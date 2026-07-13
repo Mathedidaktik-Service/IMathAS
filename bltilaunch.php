@@ -102,7 +102,10 @@ function do112relaunch() {
 }
 
 function verify112relaunch() {
-	if ($_REQUEST['tool_state'] != $_SESSION['lti_tool_state']) {
+	if (empty($_SESSION['lti_tool_state'])) {
+		reporterror(_("Invalid tool_state. May have been unable to set cookie."));
+		exit;
+	} else if ($_REQUEST['tool_state'] != $_SESSION['lti_tool_state']) {
 		reporterror(_("Invalid tool_state"));
 		exit;
 	}
@@ -132,7 +135,7 @@ if (isset($_GET['launch'])) {
 		reporterror(_("No authorized session exists. This is most likely caused by your browser blocking third-party cookies.  Please adjust your browser settings and try again. If you are using Safari, you may need to disable Prevent Cross-Site Tracking."));
 	}
 	$userid = $_SESSION['userid'];
-	if (empty($_POST['tzname']) && $_POST['tzoffset']=='') {
+	if (empty($_POST['tzname']) && (!isset($_POST['tzoffset']) || $_POST['tzoffset']=='')) {
 		echo _('Uh oh, something went wrong.  Please go back and try again');
 		exit;
 	}
@@ -167,7 +170,7 @@ if (isset($_GET['launch'])) {
 		$aid = $_SESSION['ltiitemid'];
 		$stm = $DBH->prepare('SELECT courseid,ver FROM imas_assessments WHERE id=:aid');
 		$stm->execute(array(':aid'=>$aid));
-		list($cid,$aver) = $stm->fetch(PDO::FETCH_NUM);
+		list($cid,$aver) = $stm->fetch(PDO::FETCH_NUM) ?: [false,null];
 		if ($cid===false) {
 			$diaginfo = "(Debug info: 1-$aid)";
 			reporterror(_("This assignment does not appear to exist anymore.")." $diaginfo");
@@ -307,6 +310,14 @@ if (isset($_GET['launch'])) {
                         $userid= $tmpuserid;
 					} else {
 						$infoerr = 'Existing username/password provided are not valid.';
+						if (isset($CFG['cloudwatch_loginlog'])) {
+							require_once __DIR__.'/includes/CloudWatchLogger.php';
+							addLoginLog('login_failure', $tmpuserid, [
+								'reason' => 'bad_pw',
+								'via' => 'LTI1.1',
+								'ltiuser' => [$ltiuserid, $_SESSION['lti_key']]
+							]);
+						}
 						unset($tmpuserid);
 					}
 				}
@@ -373,7 +384,7 @@ if (isset($_GET['launch'])) {
 
 					$reqdata = array('added'=>$now, 'actions'=>array(array('on'=>$now, 'status'=>11, 'via'=>'LTI')));
 					$stm = $DBH->prepare("INSERT INTO imas_instr_acct_reqs (userid,status,reqdate,reqdata) VALUES (?,11,?,?)");
-					$stm->execute(array($newuserid, $now, json_encode($reqdata)));
+					$stm->execute(array($userid, $now, json_encode($reqdata)));
 				}
 			}
 			$stm = $DBH->prepare('UPDATE imas_ltiusers SET userid=:userid WHERE id=:localltiuser');
@@ -791,7 +802,7 @@ if (isset($_GET['launch'])) {
 
 					$reqdata = array('added'=>$now, 'actions'=>array(array('on'=>$now, 'status'=>11, 'via'=>'LTI')));
 					$stm = $DBH->prepare("INSERT INTO imas_instr_acct_reqs (userid,status,reqdate,reqdata) VALUES (?,11,?,?)");
-					$stm->execute(array($newuserid, $now, json_encode($reqdata)));
+					$stm->execute(array($userid, $now, json_encode($reqdata)));
 				}
 			}
 			$stm = $DBH->prepare('UPDATE imas_ltiusers SET userid=:userid WHERE id=:localltiuser');
@@ -888,7 +899,7 @@ if ($stm->rowCount()==0) {
 				}
 				$stm = $DBH->prepare('SELECT jsondata,UIver FROM imas_courses WHERE id=:aidsourcecid');
 				$stm->execute(array(':aidsourcecid'=>$aidsourcecid));
-				list($aidsourcejsondata,$sourceUIver) = $stm->fetch(PDO::FETCH_NUM);
+				list($aidsourcejsondata,$sourceUIver) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
                 if ($aidsourcejsondata!==null) {
 				    $aidsourcejsondata = json_decode($aidsourcejsondata, true);
                 }
@@ -1472,9 +1483,9 @@ if ($linkparts[0]=='cid') {
 			if (isset($_SESSION['lti_duedate']) && $line['date_by_lti']>0 && $_SESSION['lti_duedate']!=$exceptionrow['enddate']) {
 				//if new due date is later, or no latepass used, then update
 				if ($exceptionrow['islatepass']==0 || $_SESSION['lti_duedate']>$exceptionrow['enddate']) {
-					$stm = $DBH->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
+					$stm = $DBH->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0,manualexceptionend=:enddate2 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
 					$stm->execute(array(':startdate'=>min($now, $line['startdate'], $exceptionrow['startdate']),
-						':enddate'=>$_SESSION['lti_duedate'], ':userid'=>$userid, ':assessmentid'=>$aid));
+						':enddate'=>$_SESSION['lti_duedate'], ':enddate2'=>$_SESSION['lti_duedate'], ':userid'=>$userid, ':assessmentid'=>$aid));
 				}
 			}
 			require_once "./includes/exceptionfuncs.php";
@@ -1483,8 +1494,8 @@ if ($linkparts[0]=='cid') {
 		} else if ($line['date_by_lti']==3 && isset($_SESSION['lti_duedate']) && ($line['enddate']!=$_SESSION['lti_duedate'] || $now<$line['startdate'])) {
 			//default dates already set by LTI, and users's date doesn't match - create new exception
 			//also create if it's before the default assessment startdate - since they could access via LMS, it should be available.
-			$stm = $DBH->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,'A')");
-			$stm->execute([min($now,$_SESSION['lti_duedate']), $_SESSION['lti_duedate'], 0, 1, $userid, $aid]);
+			$stm = $DBH->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,manualexceptionend,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,?,'A')");
+			$stm->execute([min($now,$_SESSION['lti_duedate']), $_SESSION['lti_duedate'], 0, 1, $_SESSION['lti_duedate'], $userid, $aid]);
 			$exceptionrow = [
 				'startdate' => min($now,$_SESSION['lti_duedate']), 
 				'enddate' => $_SESSION['lti_duedate'], 
@@ -1565,11 +1576,23 @@ if ($linkparts[0]=='cid' || $linkparts[0]=='aid' || $linkparts[0]=='placein' || 
 				//reporterror("error - you are not an instructor or tutor on the $installname course this link is associated with.  If you are team-teaching this course, have the other instructor add you as a teacher or tutor on $installname then try again.");
 				$stm = $DBH->prepare("INSERT INTO imas_teachers (userid,courseid) VALUES (:userid, :courseid)");
 				$stm->execute(array(':userid'=>$userid, ':courseid'=>$cid));
+				require_once 'includes/TeacherAuditLog.php';
+				TeacherAuditLog::addTracking(
+					$cid,
+					"Course Settings Change",
+					null,
+					[
+						'action' => 'Add Teachers',
+						'added' => $userid,
+						'via' => 'auto by LTI'
+					]
+				);
 			}
 		}
 		$timelimitmult = 1;
+		$latepassmult = 1;
 	} else {
-		$stm = $DBH->prepare("SELECT timelimitmult,latepass FROM imas_students WHERE userid=:userid AND courseid=:courseid");
+		$stm = $DBH->prepare("SELECT timelimitmult,latepass,latepassmult FROM imas_students WHERE userid=:userid AND courseid=:courseid");
 		$stm->execute(array(':userid'=>$userid, ':courseid'=>$cid));
 		if ($stm->rowCount() == 0) {
 			$stm = $DBH->prepare("SELECT id FROM imas_teachers WHERE userid=:userid AND courseid=:courseid");
@@ -1591,8 +1614,9 @@ if ($linkparts[0]=='cid' || $linkparts[0]=='aid' || $linkparts[0]=='placein' || 
 				$setstuviewon = true;
 			}
 			$timelimitmult = 1;
+			$latepassmult = 1;
 		} else {
-			list($timelimitmult,$latepasses) = $stm->fetch(PDO::FETCH_NUM);
+			list($timelimitmult,$latepasses,$latepassmult) = $stm->fetch(PDO::FETCH_NUM);
 		}
 	}
 }
@@ -1668,7 +1692,7 @@ if ($linkparts[0]=='aid') {
 	if ($SESS['ltirole']!='instructor' && $line['allowlate']>0) {
 		$stm = $DBH->prepare("SELECT latepasshrs FROM imas_courses WHERE id=:id");
 		$stm->execute(array(':id'=>$cid));
-		$latepasshrs = $stm->fetchColumn(0);
+		$latepasshrs = $stm->fetchColumn(0) * $latepassmult;
 		require_once "./includes/exceptionfuncs.php";
 		$exceptionfuncs = new ExceptionFuncs($userid, $cid, true, $latepasses, $latepasshrs);
 		list($useexception, $canundolatepass, $canuselatepass) = $exceptionfuncs->getCanUseAssessException($exceptionrow, $line);
@@ -1724,6 +1748,15 @@ $_SESSION['ltiuserid'] = $SESS['ltiuserid'];
 $_SESSION['userid'] = $userid;
 $_SESSION['time'] = $now;
 $_SESSION['started'] = $now;
+if ($createnewsession) {
+	if (isset($CFG['cloudwatch_loginlog'])) {
+		require_once __DIR__.'/includes/CloudWatchLogger.php';
+		addLoginLog('login_success', $userid, [
+			'via' => 'LTI1.1',
+			'ltiuser' => [$_SESSION['ltiuserid'], $_SESSION['lti_key']]
+		]);
+	}
+}
 
 if (!$promptforsettings && !$createnewsession && !($linkparts[0]=='aid' && $tlwrds != '')) {
 
@@ -1807,7 +1840,7 @@ if (isset($_GET['launch'])) {
 		$aid = $_SESSION['ltiitemid'];
 		$stm = $DBH->prepare("SELECT courseid,ver FROM imas_assessments WHERE id=:id");
 		$stm->execute(array(':id'=>$aid));
-		list($cid, $aver) = $stm->fetch(PDO::FETCH_NUM);
+		list($cid, $aver) = $stm->fetch(PDO::FETCH_NUM) ?: [false,null];
 		if ($cid===false) {
 			$diaginfo = "(Debug info: 4-$aid)";
 			reporterror(_("This assignment does not appear to exist anymore.")." $diaginfo");
@@ -1954,6 +1987,14 @@ if (isset($_GET['launch'])) {
                         }
 					} else {
 						$infoerr = 'Existing username/password provided are not valid.';
+						if (isset($CFG['cloudwatch_loginlog'])) {
+							require_once __DIR__.'/includes/CloudWatchLogger.php';
+							addLoginLog('login_failure', $queryuserid, [
+								'reason' => 'bad_pw',
+								'via' => 'LTI1.1',
+								'ltiuser' => [$ltiuserid, $_SESSION['lti_key']]
+							]);
+						}
 					}
 				}
 			} else {
@@ -2711,9 +2752,9 @@ if ($keyparts[0]=='cid' || $keyparts[0]=='placein' || $keyparts[0]=='LTIkey') {
             if (isset($_SESSION['lti_duedate']) && $line['date_by_lti']>0 && $_SESSION['lti_duedate']!=$exceptionrow['enddate']) {
 				//if new due date is later, or no latepass used, then update
 				if ($exceptionrow['islatepass']==0 || $_SESSION['lti_duedate']>$exceptionrow['enddate']) {
-					$stm = $DBH->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
+					$stm = $DBH->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0,manualexceptionend=:enddate2 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
 					$stm->execute(array(':startdate'=>min($now, $line['startdate'], $exceptionrow['startdate']),
-						':enddate'=>$_SESSION['lti_duedate'], ':userid'=>$userid, ':assessmentid'=>$aid));
+						':enddate'=>$_SESSION['lti_duedate'], ':enddate2'=>$_SESSION['lti_duedate'], ':userid'=>$userid, ':assessmentid'=>$aid));
 				}
 			}
 			require_once "./includes/exceptionfuncs.php";
@@ -2722,8 +2763,8 @@ if ($keyparts[0]=='cid' || $keyparts[0]=='placein' || $keyparts[0]=='LTIkey') {
 		} else if ($line['date_by_lti']==3 && isset($_SESSION['lti_duedate']) && ($line['enddate']!=$_SESSION['lti_duedate'] || $now<$line['startdate'])) {
 			//default dates already set by LTI, and users's date doesn't match - create new exception
 			//also create if it's before the default assessment startdate - since they could access via LMS, it should be available.
-			$stm = $DBH->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,'A')");
-			$stm->execute([min($now,$_SESSION['lti_duedate']), $_SESSION['lti_duedate'], 0, 1, $userid, $aid]);
+			$stm = $DBH->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,manualexceptionend,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,?,'A')");
+			$stm->execute([min($now,$_SESSION['lti_duedate']), $_SESSION['lti_duedate'], 0, 1, $_SESSION['lti_duedate'], $userid, $aid]);
 			$exceptionrow = [
 				'startdate' => min($now,$_SESSION['lti_duedate']), 
 				'enddate' => $_SESSION['lti_duedate'], 
@@ -2815,11 +2856,23 @@ if ($keyparts[0]=='cid' || $keyparts[0]=='aid' || $keyparts[0]=='placein' || $ke
 			if ($stm->rowCount() == 0) {
 				$stm = $DBH->prepare("INSERT INTO imas_tutors (userid,courseid,section) VALUES (:userid, :courseid, :section)");
 				$stm->execute(array(':userid'=>$userid, ':courseid'=>$cid, ':section'=>$_SESSION['lti_context_label']));
+				require_once 'includes/TeacherAuditLog.php';
+				TeacherAuditLog::addTracking(
+					$destcid,
+					"Roster Action",
+					null,
+					array(
+						'action' => 'Add Tutors',
+						'IDs' => $userid,
+						'via' => 'auto by LTI'
+					)
+				);
 			}
 		}
 		$timelimitmult = 1;
+		$latepassmult = 1;
 	} else {
-		$stm = $DBH->prepare("SELECT timelimitmult,latepass FROM imas_students WHERE userid=:userid AND courseid=:courseid");
+		$stm = $DBH->prepare("SELECT timelimitmult,latepass,latepassmult FROM imas_students WHERE userid=:userid AND courseid=:courseid");
 		$stm->execute(array(':userid'=>$userid, ':courseid'=>$cid));
 		if ($stm->rowCount() == 0) {
 			$stm = $DBH->prepare("SELECT id FROM imas_teachers WHERE userid=:userid AND courseid=:courseid");
@@ -2841,8 +2894,9 @@ if ($keyparts[0]=='cid' || $keyparts[0]=='aid' || $keyparts[0]=='placein' || $ke
 				$setstuviewon = true;
 			}
 			$timelimitmult = 1;
+			$latepassmult = 1;
 		} else {
-            list($timelimitmult,$latepasses) = $stm->fetch(PDO::FETCH_NUM);
+            list($timelimitmult,$latepasses,$latepassmult) = $stm->fetch(PDO::FETCH_NUM);
 		}
 	}
 }
@@ -2917,7 +2971,7 @@ if ($keyparts[0]=='aid') {
 	if ($SESS['ltirole']!='instructor' && $line['allowlate']>0 && isset($latepasses) && isset($exceptionrow)) {
 		$stm = $DBH->prepare("SELECT latepasshrs FROM imas_courses WHERE id=:id");
 		$stm->execute(array(':id'=>$cid));
-		$latepasshrs = $stm->fetchColumn(0);
+		$latepasshrs = $stm->fetchColumn(0) * $latepassmult;
 		require_once "./includes/exceptionfuncs.php";
 		$exceptionfuncs = new ExceptionFuncs($userid, $cid, true, $latepasses, $latepasshrs);
 		list($useexception, $canundolatepass, $canuselatepass) = $exceptionfuncs->getCanUseAssessException($exceptionrow, $line);
@@ -2980,6 +3034,15 @@ $_SESSION['ltiuserid'] = $SESS['ltiuserid'];
 $_SESSION['userid'] = $userid;
 $_SESSION['time'] = $now;
 $_SESSION['started'] = $now;
+if ($createnewsession) {
+	if (isset($CFG['cloudwatch_loginlog'])) {
+		require_once __DIR__.'/includes/CloudWatchLogger.php';
+		addLoginLog('login_success', $userid, [
+			'via' => 'LTI1.1',
+			'ltiuser' => [$_SESSION['ltiuserid'], $_SESSION['lti_key']]
+		]);
+	}
+}
 
 if ($_SESSION['lti_keytype']=='cc-vf' || (!$promptforsettings && !$createnewsession && !($keyparts[0]=='aid' && $tlwrds != ''))) {
 	//redirect now if already have session and no timelimit

@@ -125,6 +125,14 @@ class AccessibleTreeWidget {
             selectionContainer.appendChild(input);
         }
 
+        // Optional icon (caller-provided trusted HTML, e.g. a type badge/img)
+        let iconEl = null;
+        if (item.icon) {
+            iconEl = document.createElement('span');
+            iconEl.className = 'tree-icon';
+            iconEl.innerHTML = item.icon;
+        }
+
         // Label
         const label = document.createElement('span');
         label.className = 'tree-label';
@@ -147,22 +155,67 @@ class AccessibleTreeWidget {
         
         content.appendChild(expander);
         content.appendChild(selectionContainer);
+        if (iconEl) {
+            content.appendChild(iconEl);
+        }
         content.appendChild(label);
-        if (item.links) {
-            let linkbtn = '<a tabindex=0 class="dropdown-toggle arrow-down" id="tdd'+item.id+'" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">';
-	        linkbtn += _('Actions')+'</a>';
-	        linkbtn += '<ul class="dropdown-menu dropdown-menu-right" role="menu" aria-labelledby="tdd'+item.id+'">';
-            for (let i=0;i<item.links.length;i++) {
-                linkbtn += '<li><a href="'+item.links[i].href+'"';
-                if (item.links[i].newtab) {
-                    linkbtn += ' target="_blank"';
-                }
-                linkbtn += '>'+item.links[i].label+'</a></li>';
-            }
-            linkbtn += '</ul></span>';
+        if (item.links || (canHaveChildren && this.options.selectionMode === 'multi')) {
             let linkspan = document.createElement("span");
             linkspan.className = "dropdown";
-            linkspan.innerHTML = linkbtn;
+
+            let toggle = document.createElement("a");
+            toggle.tabIndex = 0;
+            toggle.className = "dropdown-toggle arrow-down";
+            toggle.id = "tdd" + item.id;
+            toggle.setAttribute("role", "button");
+            toggle.setAttribute("data-toggle", "dropdown");
+            toggle.setAttribute("aria-haspopup", "true");
+            toggle.setAttribute("aria-expanded", "false");
+            toggle.textContent = _('Actions');
+            linkspan.appendChild(toggle);
+
+            let menu = document.createElement("ul");
+            menu.className = "dropdown-menu dropdown-menu-right";
+            menu.setAttribute("role", "menu");
+            menu.setAttribute("aria-labelledby", "tdd" + item.id);
+
+            if (item.links) {
+                for (let i=0;i<item.links.length;i++) {
+                    let li = document.createElement("li");
+                    let a = document.createElement("a");
+                    a.href = item.links[i].href;
+                    if (item.links[i].newtab) {
+                        a.target = "_blank";
+                    }
+                    a.textContent = item.links[i].label;
+                    li.appendChild(a);
+                    menu.appendChild(li);
+                }
+            }
+            if (canHaveChildren && this.options.selectionMode === 'multi') {
+                let selAllLi = document.createElement("li");
+                let selAllA = document.createElement("a");
+                selAllA.href = "#";
+                selAllA.className = "tree-action-select-all";
+                selAllA.setAttribute("data-tree-action", "select-all");
+                selAllA.setAttribute("data-item-id", item.id);
+                selAllA.setAttribute("role", "menuitem");
+                selAllA.textContent = _('Select all children');
+                selAllLi.appendChild(selAllA);
+                menu.appendChild(selAllLi);
+
+                let unselAllLi = document.createElement("li");
+                let unselAllA = document.createElement("a");
+                unselAllA.href = "#";
+                unselAllA.className = "tree-action-unselect-all";
+                unselAllA.setAttribute("data-tree-action", "unselect-all");
+                unselAllA.setAttribute("data-item-id", item.id);
+                unselAllA.setAttribute("role", "menuitem");
+                unselAllA.textContent = _('Un-Select all children');
+                unselAllLi.appendChild(unselAllA);
+                menu.appendChild(unselAllLi);
+            }
+            linkspan.appendChild(menu);
             content.appendChild(linkspan);
         }
         li.appendChild(content);
@@ -256,6 +309,23 @@ class AccessibleTreeWidget {
     handleClick(event) {
         const treeItem = event.target.closest('.tree-item');
         if (!treeItem) return;
+
+        const actionElement = event.target.closest('[data-tree-action]');
+        if (actionElement) {
+            event.preventDefault();
+            event.stopPropagation();
+            const itemId = actionElement.getAttribute('data-item-id');
+            const itemData = this.renderedItems.get(itemId)?.data;
+            if (!itemData || itemData.disabled || itemData.locked) return;
+
+            this.setFocus(treeItem);
+            if (actionElement.getAttribute('data-tree-action') === 'select-all') {
+                this.selectAllChildren(itemId);
+            } else if (actionElement.getAttribute('data-tree-action') === 'unselect-all') {
+                this.unselectAllChildren(itemId);
+            }
+            return;
+        }
 
         if (event.target.closest('.dropdown')) {
             return;
@@ -456,6 +526,79 @@ class AccessibleTreeWidget {
 
         this.updateSelectionUI();
         this.options.onSelectionChange(this.getSelectedItems(), this.getSelectedNames());
+    }
+
+    async selectAllChildren(itemId) {
+        const rootItem = this.renderedItems.get(itemId);
+        if (!rootItem) return;
+
+        const hasChildren = rootItem.data.children && rootItem.data.children.length > 0;
+        const hasChildrenUrl = rootItem.data.childrenUrl && !this.loadedItems.has(itemId);
+        if (!hasChildren && !hasChildrenUrl) return;
+
+        this.expandedItems.add(itemId);
+        await this.expandAllDescendants(rootItem.data);
+
+        const updatedRoot = this.renderedItems.get(itemId)?.data;
+        if (!updatedRoot) return;
+
+        const descendantIds = this.collectSelectableDescendantIds(updatedRoot);
+        descendantIds.forEach(id => this.selectedItems.add(id));
+
+        this.reRenderItem(itemId);
+        this.updateSelectionUI();
+        this.options.onSelectionChange(this.getSelectedItems(), this.getSelectedNames());
+    }
+
+    unselectAllChildren(itemId) {
+        const rootItem = this.renderedItems.get(itemId);
+        if (!rootItem) return;
+
+        if (!rootItem.data.children || rootItem.data.children.length === 0) return;
+
+        const descendantIds = this.collectSelectableDescendantIds(rootItem.data);
+        descendantIds.forEach(id => this.selectedItems.delete(id));
+
+        this.reRenderItem(itemId);
+        this.updateSelectionUI();
+        this.options.onSelectionChange(this.getSelectedItems(), this.getSelectedNames());
+    }
+
+    async expandAllDescendants(item) {
+        const itemId = item.id;
+        const hasChildren = item.children && item.children.length > 0;
+        const hasChildrenUrl = item.childrenUrl && !this.loadedItems.has(itemId);
+
+        if (hasChildrenUrl) {
+            await this.loadChildren(itemId);
+            item = this.renderedItems.get(itemId)?.data || item;
+        }
+
+        if (!item.children || item.children.length === 0) {
+            return;
+        }
+
+        this.expandedItems.add(itemId);
+        this.reRenderItem(itemId);
+
+        for (const child of item.children) {
+            await this.expandAllDescendants(child);
+        }
+    }
+
+    collectSelectableDescendantIds(item, ids = []) {
+        if (!item.children || item.children.length === 0) {
+            return ids;
+        }
+
+        item.children.forEach(child => {
+            if (this.canSelectItem(child) && !child.disabled && !child.locked) {
+                ids.push(child.id);
+            }
+            this.collectSelectableDescendantIds(child, ids);
+        });
+
+        return ids;
     }
 
     updateSelectionUI() {

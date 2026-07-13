@@ -9,9 +9,9 @@
         exit;
     }
     
-	$stm = $DBH->prepare("SELECT itemorder,viddata,intro,defpoints,courseid,ver,showhints,showwork FROM imas_assessments WHERE id=:id");
+	$stm = $DBH->prepare("SELECT itemorder,viddata,intro,defpoints,courseid,ver,showhints,showwork,drilljson,displaymethod FROM imas_assessments WHERE id=:id");
 	$stm->execute(array(':id'=>$aid));
-	list($rawitemorder, $viddata,$current_intro_json, $defpoints,$assesscourseid,$aver,$showhints,$showwork) = $stm->fetch(PDO::FETCH_NUM);
+	list($rawitemorder, $viddata,$current_intro_json, $defpoints,$assesscourseid,$aver,$showhints,$showwork,$rawdrilljson,$assessdisplaymethod) = $stm->fetch(PDO::FETCH_NUM);
 	if ($assesscourseid != $cid) {
 		echo "error: invalid ID";
 		exit;
@@ -34,7 +34,7 @@
 	}
 
     if (isset($_POST['addnewdef'])) {
-        if (!isset($_POST['lastitemhash']) || md5($rawitemorder) !== $_POST['lastitemhash']) {
+        if (!isset($_POST['lastitemhash']) || md5($rawitemorder . $current_intro_json) !== $_POST['lastitemhash']) {
             echo '{"error": "assessment questions have changed elsewhere. Reload the page and try again."}';
             exit;
         }
@@ -110,22 +110,26 @@
             'showhints' => $showhints
         ]);
         
-        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder)], 
+        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder . $current_intro_json)], 
             JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE);
         exit;
     } else if (isset($_POST['addnew'])) {
 
     } 
 
+	function removeGrpNames($order) {
+		return preg_replace('/(\d+\|\d+)\|.*?~/', '$1~', $order);
+	}
+
 	if (!isset($_POST['order']) || !isset($_POST['text_order']) || !isset($_POST['lastitemhash'])) {
 		echo "error: missing required values";
 		exit;
     }
-    if ($beentaken && $rawitemorder != $_REQUEST['order']) {
+    if ($beentaken && removeGrpNames($rawitemorder) != removeGrpNames($_REQUEST['order'])) {
         echo 'error: '._('Students have started the assessment, and you cannot change questions or order after students have started; reload the page');
         exit;
     }
-    if (md5($rawitemorder) !== $_POST['lastitemhash']) {
+    if (md5($rawitemorder . $current_intro_json) !== $_POST['lastitemhash']) {
         echo "error: assessment questions have changed elsewhere. Reload the page and try again.";
         exit;
     }
@@ -166,12 +170,19 @@
 	$submitted = $_REQUEST['order'];
 	$submitted = str_replace('~',',',$submitted);
 	$newitems = array();
-	foreach (explode(',',$submitted) as $qid) {
-		if (strpos($qid,'|')===false) {
-			$newitems[] = Sanitize::onlyInt($qid);
+	if ($submitted !== '') {
+		foreach (explode(',',$submitted) as $qid) {
+			if (strpos($qid,'|')===false) {
+				$newitems[] = Sanitize::onlyInt($qid);
+			}
 		}
 	}
 	$toremove = array_diff($curitems,$newitems);
+	if (!empty(array_diff($newitems, $curitems))) {
+		// this would mean there's a qid in the itemorder that didn't previously exist
+		echo "error: invalid item in order";
+        exit;
+	}
 
 	if ($viddata != '') {
 		$viddata = unserialize($viddata);
@@ -291,6 +302,29 @@
 		}
     }
 
+	//update drill display names
+	$drilljsonchanged = false;
+	if ($assessdisplaymethod == 'drill' && isset($_POST['dispnames'])) {
+		$newdispnames = json_decode($_POST['dispnames'], true);
+		if (is_array($newdispnames)) {
+			$drilljson = ($rawdrilljson != '') ? json_decode($rawdrilljson, true) : array();
+			if (!is_array($drilljson)) { $drilljson = array(); }
+			$dispnames = array();
+			$stm = $DBH->prepare("SELECT id FROM imas_questions WHERE assessmentid=?");
+			$stm->execute(array($aid));
+			while ($qrow = $stm->fetch(PDO::FETCH_ASSOC)) {
+				$qkey = 'qn' . $qrow['id'];
+				if (!empty($newdispnames[$qkey])) {
+					$dispnames[$qkey] = Sanitize::stripHtmlTags($newdispnames[$qkey]);
+				}
+			}
+			$drilljson['dispnames'] = $dispnames;
+			$upd_drilljson = $DBH->prepare("UPDATE imas_assessments SET drilljson=? WHERE id=? AND courseid=?");
+			$upd_drilljson->execute(array(json_encode($drilljson), $aid, $cid));
+			$drilljsonchanged = ($upd_drilljson->rowCount() > 0);
+		}
+	}
+
 	$qarr = array(':itemorder'=>$_REQUEST['order'], ':viddata'=>$viddata, ':intro'=>$new_intro, ':id'=>$aid, ':courseid'=>$cid);
 	$query = "UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata,intro=:intro";
 	if (isset($_POST['defpts'])) {
@@ -324,8 +358,12 @@
 		$stm = $DBH->prepare($query);
 		$stm->execute(array($cid, $aid));
 
-        echo md5($_REQUEST['order']);
+        echo md5($_REQUEST['order'] . $new_intro);
 		//echo "OK";
+	} else if ($drilljsonchanged) {
+		// itemorder/points didn't change, but the drill display names did;
+		// the hash is unchanged since it doesn't depend on drilljson
+		echo md5($_REQUEST['order'] . $new_intro);
 	} else {
 		echo "error: not saved";
 	}

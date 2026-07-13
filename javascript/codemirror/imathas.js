@@ -84,7 +84,31 @@
     "for foreach if or off switch try while where empty isset list";
   var imathasAtoms = "true false null TRUE FALSE NULL";
   //macros.php
-  var imathasBuiltin = "exp nthlog sinn cosn tann secn cscn cotn rand rrand rands rrands randfrom randsfrom jointrandfrom diffrandsfrom nonzerorand nonzerorrand nonzerorands nonzerorrands diffrands diffrrands nonzerodiffrands nonzerodiffrrands singleshuffle jointshuffle is_array makepretty makeprettydisp showplot addlabel showarrays horizshowarrays showasciisvg listtoarray arraytolist calclisttoarray sortarray consecutive gcd lcm calconarray mergearrays sumarray dispreducedfraction diffarrays intersectarrays joinarray unionarrays count polymakepretty polymakeprettydisp makexpretty makexprettydisp calconarrayif in_array prettyint prettyreal prettysigfig roundsigfig arraystodots subarray showdataarray arraystodoteqns array_flip arrayfindindex fillarray arraysetvalues array_reverse root getsnapwidthheight is_numeric is_nan sign sgn prettynegs dechex hexdec print_r replacealttext randpythag changeimagesize mod fmod numtowords randname randnamewpronouns randmalename randfemalename randnames randmalenames randfemalenames randcity randcities prettytime definefunc evalfunc evalnumstr normalizefunc safepow arrayfindindices stringtoarray strtoupper strtolower ucfirst makereducedfraction makereducedmixednumber stringappend stringprepend textonimage addplotborder addlabelabs makescinot today numtoroman sprintf arrayhasduplicates are_numeric addfractionaxislabels decimaltofraction ifthen cases multicalconarray htmlentities formhoverover formpopup connectthedots jointsort stringpos stringlen stringclean substr substr_count str_replace makexxpretty makexxprettydisp forminlinebutton makenumberrequiretimes comparenumbers comparefunctions getnumbervalue showrecttable htmldisp getstuans checkreqtimes stringtopolyterms getfeedbackbasic getfeedbacktxt getfeedbacktxtessay getfeedbacktxtnumber getfeedbacktxtnumfunc getfeedbacktxtcalculated explode gettwopointlinedata getdotsdata getntupleparts getopendotsdata gettwopointdata gettwopointformulas getlinesdata getineqdata adddrawcommand mergeplots invertplot array_unique ABarray scoremultiorder scoreperiodic scorestring randstate randstates prettysmallnumber makeprettynegative rawurlencode fractowords randcountry randcountries sorttwopointdata addimageborder formatcomplex array_keys array_values comparelogic comparesetexp stuansready comparentuples comparenumberswithunits isset atan2 keepif checkanswerformat preg_match preg_replace is_nan intval comparesameform splicearray getsigfigs checksigfigs prettysigfig_instring prettyreal_instring round_instring";
+  var imathasBuiltin = "exp nthlog sinn cosn tann secn cscn cotn rand rrand rands rrands randfrom randsfrom jointrandfrom"
+        + " diffrandsfrom nonzerorand nonzerorrand nonzerorands nonzerorrands diffrands diffrrands nonzerodiffrands"
+        + " nonzerodiffrrands singleshuffle jointshuffle is_array makepretty makeprettydisp showplot addlabel showarrays"
+        + " horizshowarrays showasciisvg listtoarray arraytolist calclisttoarray sortarray consecutive gcd lcm calconarray"
+        + " mergearrays sumarray dispreducedfraction diffarrays intersectarrays joinarray unionarrays count polymakepretty"
+        + " polymakeprettydisp makexpretty makexprettydisp calconarrayif in_array prettyint prettyreal prettysigfig"
+        + " roundsigfig arraystodots subarray showdataarray arraystodoteqns array_flip arrayfindindex fillarray"
+        + " arraysetvalues array_reverse root getsnapwidthheight is_numeric is_nan sign sgn prettynegs dechex hexdec"
+        + " print_r replacealttext randpythag changeimagesize mod fmod numtowords randname randnamewpronouns"
+        + " randmalename randfemalename randnames randmalenames randfemalenames randcity randcities prettytime"
+        + " definefunc evalfunc evalnumstr normalizefunc safepow arrayfindindices stringtoarray strtoupper strtolower"
+        + " ucfirst makereducedfraction makereducedmixednumber stringappend stringprepend textonimage addplotborder"
+        + " addlabelabs makescinot today numtoroman sprintf arrayhasduplicates are_numeric addfractionaxislabels"
+        + " decimaltofraction ifthen cases multicalconarray htmlentities formhoverover formpopup connectthedots"
+        + " jointsort stringpos stringlen stringclean substr substr_count str_replace makexxpretty makexxprettydisp"
+        + " forminlinebutton makenumberrequiretimes comparenumbers comparefunctions getnumbervalue showrecttable"
+        + " htmldisp getstuans checkreqtimes stringtopolyterms getfeedbackbasic getfeedbacktxt getfeedbacktxtessay"
+        + " getfeedbacktxtnumber getfeedbacktxtnumfunc getfeedbacktxtcalculated explode gettwopointlinedata getdotsdata"
+        + " getntupleparts getopendotsdata gettwopointdata gettwopointformulas getlinesdata getineqdata adddrawcommand"
+        + " mergeplots invertplot array_unique ABarray scoremultiorder scoreperiodic scorestring randstate randstates"
+        + " prettysmallnumber makeprettynegative rawurlencode fractowords randcountry randcountries sorttwopointdata"
+        + " addimageborder formatcomplex array_keys array_values comparelogic comparesetexp stuansready comparentuples"
+        + " comparenumberswithunits isset atan2 keepif checkanswerformat preg_match preg_replace is_nan intval"
+        + " comparesameform comparecomplex splicearray getsigfigs checksigfigs prettysigfig_instring prettyreal_instring"
+        + " round_instring setupmathquillfillin simplifyexpr floatval levenshtein uniqid";
   //builtin
   imathasBuiltin += " loadlibrary importcodefrom includecodefrom setseed";
   //math
@@ -161,7 +185,7 @@
     // solvers
     imathasBuiltin += " discretenewtons bisectionsolve";
     // stats
-    imathasBuiltin += " nCr nPr mean stdev variance absmeandev percentile interppercentile Nplus1percentile quartile TIquartile Excelquartile Excelquartileexc Nplus1quartile allquartile median freqdist frequency histogram fdhistogram fdbargraph normrand expdistrand boxplot normalcdf tcdf invnormalcdf invtcdf invtcdf2 linreg expreg countif binomialpdf binomialcdf chicdf invchicdf chi2cdf invchi2cdf fcdf invfcdf piechart mosaicplot checklineagainstdata chi2teststat checkdrawnlineagainstdata csvdownloadlink modes forceonemode dotplot gamma_cdf gamma_inv beta_cdf beta_inv anova1way_f anova1way anova2way anova_table anova2way_f student_t cluster_bargraph stem_plot poissonpdf poissoncdf";
+    imathasBuiltin += " nCr nPr mean stdev variance absmeandev percentile interppercentile Nplus1percentile quartile TIquartile Excelquartile Excelquartileexc Nplus1quartile allquartile median freqdist frequency histogram fdhistogram fdbargraph normrand expdistrand boxplot normalcdf tcdf invnormalcdf invtcdf invtcdf2 linreg expreg countif binomialpdf binomialcdf chicdf invchicdf chi2cdf invchi2cdf fcdf invfcdf piechart mosaicplot checklineagainstdata chi2teststat checkdrawnlineagainstdata csvdownloadlink modes forceonemode dotplot gamma_cdf gamma_inv beta_cdf beta_inv anova1way_f anova1way anova2way anova_table anova2way_f student_t cluster_bargraph stem_plot poissonpdf poissoncdf geometricdf geometripdf negbinomialpdf negbinomialcdf hypgeomcdf hypgeompdf";
     // timedate
     imathasBuiltin += " timetominutes thisyear";
     // units

@@ -117,6 +117,7 @@ class QuestionHtmlGenerator
 
         $doShowAnswer = $this->questionParams->getShowAnswer();
         $doShowAnswerParts = $this->questionParams->getShowAnswerParts();
+        $noDetailedSoln = $this->questionParams->getNoDetailedSoln();
 
         if (ShowAnswer::ALWAYS == $doShowAnswer) {
             $nosabutton = true;
@@ -138,6 +139,7 @@ class QuestionHtmlGenerator
         $correctAnswerWrongFormat = $this->questionParams->getCorrectAnswerWrongFormat();
         $printFormat = $this->questionParams->getPrintFormat();
         $teacherInGb = $this->questionParams->getTeacherInGb();
+        $showGbDetails = $this->questionParams->getShowGbDetails();
         $graphdispmode = $_SESSION['userprefs']['graphdisp'] ?? 1;
         $drawentrymode = $_SESSION['userprefs']['drawentry'] ?? 1;
 
@@ -262,9 +264,17 @@ class QuestionHtmlGenerator
         // In "modern" questions, the last two parts are empty.
         try {
           $db_qsetid = $this->questionParams->getDbQuestionSetId();
-          eval(interpret('control', $quesData['qtype'], $quesData['control'], 1, [$db_qsetid]));
-          eval(interpret('qcontrol', $quesData['qtype'], $quesData['qcontrol'], 1, [$db_qsetid]));
-          eval(interpret('answer', $quesData['qtype'], $quesData['answer'], 1, [$db_qsetid]));
+          $controlinterpcode = interpret('control', $quesData['qtype'], $quesData['control'], 1, [$db_qsetid]);
+          if ($controlinterpcode !== 'error;') {
+            eval($controlinterpcode);
+          }
+          unset($controlinterpcode);
+          if (!empty($quesData['qcontrol'])) {
+            eval(interpret('qcontrol', $quesData['qtype'], $quesData['qcontrol'], 1, [$db_qsetid]));
+          }
+          if (!empty($quesData['answer'])) {
+            eval(interpret('answer', $quesData['qtype'], $quesData['answer'], 1, [$db_qsetid]));
+          }
         } catch (\Throwable $t) {
           $errsource = basename($t->getFile());
           if (strpos($errsource, 'QuestionHtmlGenerator.php') !== false) {
@@ -466,7 +476,15 @@ class QuestionHtmlGenerator
                 }
                 if (isset($answeights)) {
         			if (!is_array($answeights)) {
-        					$answeights = explode(",",$answeights);
+        				$answeights = explode(",",$answeights);
+                    }
+                    if (count(array_filter(array_keys($answeights), 'is_int')) != count($answeights)) {
+                        echo 'Error: All keys of $answeights should be numbers';
+                        $answeights = array_fill_keys(array_keys($anstypes), 1);
+                    }
+                    if (count(array_filter($answeights, 'is_array')) > 0) {
+                        echo 'Error: All elements of $answeights should be numbers, not arrays';
+                        $answeights = array_fill_keys(array_keys($anstypes), 1);
                     }
                     $answeights = array_map('trim', $answeights);
                     if (count($answeights) != count($anstypes)) {
@@ -532,6 +550,7 @@ class QuestionHtmlGenerator
                     }
                     if ($seqPartDone !== true && empty($seqPartDone[$_pnidx]) && ($quesData['qtype'] == "conditional" || !empty($answeights[$_pnidx]))) {
                       $_thisGroupDone = false;
+                      $jsParams['hasseqnext'] = true;
                     }
                   }
                   $seqGroupDone[$kidx] = $_thisGroupDone;
@@ -592,6 +611,7 @@ class QuestionHtmlGenerator
                     ->setAssessmentId($this->questionParams->getAssessmentId())
                     ->setStudentLastAnswers($lastAnswersAllParts[$atIdx] ?? '')
                     ->setColorboxKeyword($questionColor)
+                    ->setShowGbDetails($showGbDetails)
                     ->setCorrectAnswerWrongFormat($correctAnswerWrongFormat[$atIdx] ?? false);
 
                 try {
@@ -610,6 +630,9 @@ class QuestionHtmlGenerator
                 $qnRef = ($this->questionParams->getDisplayQuestionNumber()+1)*1000 + $atIdx;
                 $jsParams[$qnRef] = $answerBoxGenerator->getJsParams();
                 $jsParams[$qnRef]['qtype'] = $anstype;
+                if (!empty($disablePartsWhenCorrect[$atIdx]) || (!empty($disablePartsWhenCorrect) && !is_array($disablePartsWhenCorrect))) {
+                    $jsParams[$qnRef]['disableoncorrect'] = 1;
+                }
                 $displayedAnswersForParts[$atIdx] = $answerBoxGenerator->getCorrectAnswerForPart();
                 $previewloc[$atIdx] = $answerBoxGenerator->getPreviewLocation();
 
@@ -684,6 +707,7 @@ class QuestionHtmlGenerator
                 ->setIsConditional(false)
                 ->setStudentLastAnswers($lastAnswer)
                 ->setColorboxKeyword($questionColor)
+                ->setShowGbDetails($showGbDetails)
                 ->setCorrectAnswerWrongFormat($correctAnswerWrongFormat[0] ?? false);
 
             try {
@@ -797,11 +821,46 @@ class QuestionHtmlGenerator
         $evaledqtext = str_replace(['\\{','\\}'], ['{','}'], $evaledqtext);
         $evaledsoln = str_replace(['\\{','\\}'], ['{','}'], $evaledsoln);
 
+        // scope CSS
+        $evaledqtext = preg_replace_callback('/(<style[^>]*?>)(.*?)(<\/style>|$)/s', function($m) use ($thisq) {
+            return $m[1] . $this->scopeCssToParent($m[2], ".qscope$thisq") . '</style>';
+        }, $evaledqtext);
+        // scope CSS
+        $evaledsoln = preg_replace_callback('/(<style[^>]*?>)(.*?)(<\/style>|$)/s', function($m) use ($thisq) {
+            return $m[1] . $this->scopeCssToParent($m[2], ".qscope$thisq") . '</style>';
+        }, $evaledsoln);
+
+        /*
+         * Handle [SAB#-#] notation
+         */ 
+        $usingSABrange = false;
+        preg_match_all('/\[SAB(\d+)-(\d+)\]/', $evaledqtext, $matches, PREG_SET_ORDER);
+        if (!empty($matches)) {
+            $usingSABrange = true;
+            foreach ($matches as $atIdx) {
+                $_thisIsReady = true;
+                for ($iidx=$atIdx[1];$iidx<=$atIdx[2];$iidx++) {
+                    if (empty($doShowAnswerParts[$iidx]) && !$doShowAnswer) {
+                        $_thisIsReady = false;
+                        $doShowDetailedSoln = false;
+                        for ($siidx=$atIdx[1]; $siidx < $atIdx[2]; $siidx++) {
+                            $doShowAnswerParts[$siidx] = false;
+                        }
+                        break;
+                    } else if ($iidx < $atIdx[2]) {
+                        $doShowAnswerParts[$iidx] = false;
+                    }
+                }
+                $doShowAnswerParts[$atIdx[2]] = $_thisIsReady;
+                $evaledqtext = str_replace($atIdx[0], '[SAB'.$atIdx[2].']', $evaledqtext);
+            }
+        }
+
         /*
          * Possibly adjust the showanswer if it doesn't look right
          */
         $doShowDetailedSoln = false;
-        if (isset($showanswer) && is_array($showanswer) && is_array($answerbox) && count($showanswer) < count($answerbox)) {
+        if (isset($showanswer) && is_array($showanswer) && is_array($answerbox) && count($showanswer) < count($answerbox) && !$usingSABrange) {
             $showansboxloccnt = substr_count($evaledqtext,'$showanswerloc') + substr_count($evaledqtext,'[SAB');
             if ($showansboxloccnt > 0 && count($answerbox) > $showansboxloccnt && count($showanswer) == $showansboxloccnt) {
                 // not enough showanswerloc boxes for all the parts.  
@@ -928,9 +987,10 @@ class QuestionHtmlGenerator
                 }
               }
               if ($lastGroupDone) { // add html to output
-                $newqtext .= '<p class="seqsep" role="heading" tabindex="-1">';
+                $newqtext .= '<div tabindex="-1" class="seqsepwrap"><div class="seqscoreresult" hidden></div>';
+                $newqtext .= '<p class="seqsep" role="heading">';
                 $newqtext .= sprintf(_('Part %d of %d'), $k+1, count($seqParts));
-                $newqtext .= '</p><div>' . $seqPart . '</div>';
+                $newqtext .= '</p><div>' . $seqPart . '</div></div>';
               }
               $lastGroupDone = $thisGroupDone;
             }
@@ -955,7 +1015,7 @@ class QuestionHtmlGenerator
             }
         }
 
-        $evaledqtext = "<div class=\"question\" role=region aria-label=\"" . _('Question') . ' ' 
+        $evaledqtext = "<div class=\"question qscope$thisq\" role=region aria-label=\"" . _('Question') . ' ' 
             . ($this->questionParams->getDisplayQuestionNumber()+1) . "\">\n"
             . filter($evaledqtext);
 
@@ -1001,16 +1061,16 @@ class QuestionHtmlGenerator
           }
         }
         // display detailed solution, if allowed and set
-        if (($doShowAnswer || $doShowDetailedSoln) && ($quesData['solutionopts']&4)==4 && $quesData['solution'] != '') {
+        if (!$noDetailedSoln && ($doShowAnswer || $doShowDetailedSoln) && ($quesData['solutionopts']&4)==4 && $quesData['solution'] != '') {
           if (($quesData['solutionopts']&1)==0) {
-            $evaledsoln = '<i>'._('This solution is for a similar problem, not your specific version').'</i><br/>'.$evaledsoln;
+            $evaledsoln = "<div class=\"qscope$thisq\">".'<i>'._('This solution is for a similar problem, not your specific version').'</i><br/>'.$evaledsoln.'</div>';
           }
           if ($nosabutton) {
-            $sadiv .= filter("<div><p>" . _('Detailed Solution').'</p>'. $evaledsoln .'</div>');
+            $sadiv .= filter("<div class=\"qscope$thisq\"><p>" . _('Detailed Solution').'</p>'. $evaledsoln .'</div>');
           } else {
             $qnidx = $this->questionParams->getDisplayQuestionNumber();
             $sadiv .= "<div><input class=\"dsbtn\" type=button value=\""._('Show Detailed Solution')."\" />";
-            $sadiv .= filter(" <div class=\"hidden dsbox\" id=\"dsbox$qnidx\">$evaledsoln </div></div>\n");
+            $sadiv .= filter(" <div class=\"hidden dsbox qscope$thisq\" id=\"dsbox$qnidx\">$evaledsoln </div></div>\n");
           }
         }
         if ($sadiv !== '') {
@@ -1452,11 +1512,18 @@ class QuestionHtmlGenerator
                     //$externalReferences .= formpopup($extrefpt[0], $extrefpt[1], $vidextrefwidth, $vidextrefheight, "button", true, "video", $qref);
                 } else {
                     //$externalReferences .= formpopup($extrefpt[0], $extrefpt[1], $extrefwidth, $extrefheight, "button", true, "text", $qref);
+                    if (strpos($extrefpt[1], '3playmedia.com') !== false) {
+                        $thiswidth = 840;
+                        $thisheight = 560;
+                    } else {
+                        $thiswidth = $extrefwidth;
+                        $thisheight = $extrefheight;
+                    }
                     $externalReferences[] = [
                         'label' => $extrefpt[0],
                         'url' => $extrefpt[1],
-                        'w' => $extrefwidth,
-                        'h' => $extrefheight,
+                        'w' => $thiswidth,
+                        'h' => $thisheight,
                         'ref' => $qref,
                         'descr' => !empty($extrefpt[3]) ? $extrefpt[3] : '' 
                     ];
@@ -1597,4 +1664,80 @@ class QuestionHtmlGenerator
         }
         return $arr;
     }
+
+    /*
+     *  Scopes css styles to a parent selector
+     */ 
+    private function scopeCssToParent(string $css, string $prefix): string {
+        // Handle @rules with blocks (e.g. @media, @supports, @layer)
+        $css = preg_replace_callback(
+            '/(@(?:media|supports|layer|container)[^{]+)\{(.*)\}/s',
+            function (array $matches) use ($prefix): string {
+                $atRule     = trim($matches[1]);
+                $innerCss   = $matches[2];
+                // Recursively scope the contents
+                $innerScoped = $this->scopeCssToParent($innerCss, $prefix);
+                return "$atRule {\n$innerScoped}";
+            },
+            $css
+        );
+
+        // Match CSS rule blocks: selectors { declarations }
+        return preg_replace_callback(
+            '/([^{}]+)\{([^{}]*)\}/s',
+            function (array $matches) use ($prefix): string {
+                $selectors    = $matches[1];
+                $declarations = $matches[2];
+
+                // Split on commas, but only top-level ones (not inside parens)
+                $selectorList = $this->splitCSSSelectors($selectors);
+
+                $scoped = array_map(function (string $sel) use ($prefix): string {
+                    $sel = preg_replace('/^\s*(body|html|#questionwrap\d+)/', '', $sel);
+                    $sel = trim($sel);
+                    // If the selector already starts with the prefix, leave it alone
+                    if (str_starts_with($sel, $prefix)) {
+                        return $sel;
+                    }
+                    return "$prefix $sel";
+                }, $selectorList);
+
+                return implode(",\n  ", $scoped) . " {" . $declarations . "}\n";
+            },
+            $css
+        );
+    }
+
+    /**
+     * Split a CSS selector string on commas, respecting parentheses
+     * (e.g. :is(), :not(), calc()) so we don't split inside them.
+     */
+    function splitCSSSelectors(string $selectors): array {
+        $list  = [];
+        $depth = 0;
+        $current = '';
+
+        for ($i = 0, $len = strlen($selectors); $i < $len; $i++) {
+            $char = $selectors[$i];
+            if ($char === '(') {
+                $depth++;
+                $current .= $char;
+            } elseif ($char === ')') {
+                $depth--;
+                $current .= $char;
+            } elseif ($char === ',' && $depth === 0) {
+                $list[] = $current;
+                $current = '';
+            } else {
+                $current .= $char;
+            }
+        }
+
+        if (trim($current) !== '') {
+            $list[] = $current;
+        }
+
+        return $list;
+}
+
 }

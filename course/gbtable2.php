@@ -3,6 +3,7 @@
 //(c) 2007 David Lippman
 
 require_once "../includes/exceptionfuncs.php";
+require_once "../includes/reqscorefuncs.php";
 
 if ($GLOBALS['canviewall'] || !isset($studentinfo)) {
 	$GLOBALS['exceptionfuncs'] = new ExceptionFuncs($userid, $cid, false);
@@ -307,7 +308,7 @@ function gbtable() {
 	$now = time();
 	$query = "SELECT id,name,ptsposs,defpoints,deffeedback,timelimit,minscore,startdate,enddate,LPcutoff,itemorder,gbcategory,cntingb,avail,groupsetid,isgroup,allowlate,date_by_lti,ver,viewingb,scoresingb,deffeedbacktext";
 	if ($limuser>0) {
-		$query .= ',reqscoreaid,reqscore,reqscoretype,workcutoff';
+		$query .= ',reqscorejson,workcutoff';
 	}
 	if (isset($includeendmsg) && $includeendmsg) {
 		$query .= ',endmsg';
@@ -412,8 +413,8 @@ function gbtable() {
 		if (isset($line['endmsg']) && $line['endmsg']!='') {
 			$endmsgs[$kcnt] = unserialize($line['endmsg']);
 		}
-		if ($limuser>0) {
-			$reqscores[$kcnt] = array('aid'=>$line['reqscoreaid'], 'score'=>abs($line['reqscore']), 'calctype'=>($line['reqscoretype']&2));
+		if ($limuser>0 && $line['reqscorejson'] !== '') {
+			$reqscores[$kcnt] = json_decode($line['reqscorejson'], true);
 		}
 		$defFb[$kcnt] = $line['deffeedbacktext'];
 
@@ -1150,7 +1151,7 @@ function gbtable() {
 		} else {
 			$gb[$row][1][$col][8] = round($timeontask/60,1);
 		}
-		if (isset($GLOBALS['includelastchange']) && $GLOBALS['includelastchange']==true) {
+		if (!empty($GLOBALS['includelastchange'])) {
 			$gb[$row][1][$col][9] =	$l['endtime'];
 		}
 
@@ -1371,7 +1372,7 @@ function gbtable() {
 		} else {
 			$gb[$row][1][$col][8] = round($timeontask/60,1);
 		}
-		if (isset($GLOBALS['includelastchange']) && $GLOBALS['includelastchange']==true) {
+		if (!empty($GLOBALS['includelastchange'])) {
 			$gb[$row][1][$col][9] =	$l['lastchange'];
 		}
 
@@ -1666,7 +1667,7 @@ function gbtable() {
 				}
 
 				if ($l['score']!=null) {
-					if (isset($gb[$row][1][$col][0])) {
+					if (isset($gb[$row][1][$col][0]) && is_numeric($gb[$row][1][$col][0])) {
 						$gb[$row][1][$col][0] += 1*$l['score']; //adding up all forum scores
 					} else {
 						$gb[$row][1][$col][0] = 1*$l['score'];
@@ -1694,7 +1695,9 @@ function gbtable() {
                		!in_array($stusection[$l['userid']], $sectionlimit[$col])
                 ) {
                     // is not in this stu's section, so we won't count it, 
-                    $gb[$row][1][$col][0] = ' ';
+					if (!isset($gb[$row][1][$col][0])) {
+                    	$gb[$row][1][$col][0] = ' ';
+					}
                 } else if ($cntingb[$i] == 1) {
 					if ($gb[0][1][$col][3]<1) { //past
 						$cattotpast[$row][$category[$i]][$col] = $gb[$row][1][$col][0];
@@ -1751,6 +1754,30 @@ function gbtable() {
 					$cattotfutureec[$row][$category[$i]][$col] = 1*$l['score'];
 				}
 			}
+		}
+	}
+
+	//Get forum last changed dates
+	if (!empty($GLOBALS['includelastchange']) && count($discuss)>0) {
+		$forumidlist = implode(',', array_map('intval', $discuss)); //values from DB
+		if ($limuser>0) {
+			$stm2 = $DBH->prepare("SELECT ifp.forumid, ifp.userid, MAX(ifp.postdate) as lastpostdate FROM imas_forum_posts AS ifp
+				JOIN imas_grades ON imas_grades.gradetype='forum' AND imas_grades.refid=ifp.id AND imas_grades.score IS NOT NULL
+				WHERE ifp.forumid IN ($forumidlist) AND ifp.userid=:userid GROUP BY ifp.forumid, ifp.userid");
+			$stm2->execute(array(':userid'=>$limuser));
+		} else {
+			$stm2 = $DBH->query("SELECT ifp.forumid, ifp.userid, MAX(ifp.postdate) as lastpostdate FROM imas_forum_posts AS ifp
+				JOIN imas_grades ON imas_grades.gradetype='forum' AND imas_grades.refid=ifp.id AND imas_grades.score IS NOT NULL
+				WHERE ifp.forumid IN ($forumidlist) GROUP BY ifp.forumid, ifp.userid");
+		}
+		while ($l = $stm2->fetch(PDO::FETCH_ASSOC)) {
+			if (!isset($discussidx[$l['forumid']]) || !isset($sturow[$l['userid']]) || !isset($discusscol[$l['forumid']])) {
+				continue;
+			}
+			$row = $sturow[$l['userid']];
+			$col = $discusscol[$l['forumid']];
+			
+			$gb[$row][1][$col][9] = $l['lastpostdate'];
 		}
 	}
 
@@ -2571,24 +2598,29 @@ function gbtable() {
 
 		$gb[$ln][4][0] = -1;
 	}
-	if ($limuser>0) { //mark reqscoreaid
+	if ($limuser>0) { //mark reqscores
+		// two passes: one to gather scores
 		foreach ($gb[0][1] as $col=>$gbitem) {
-			if ($gbitem[6]==0) {
+			if ($gbitem[6]==0) { 
+				$k = $assessidx[$gbitem[7]];
+				$reqScoreData[$gbitem[7]] = [
+					'id'=>$gbitem[7],
+					'name'=>$gbitem[0],
+					'ptsposs'=>$gbitem[2],
+					'score'=>(!empty($gb[1][1][$col][0]) && is_numeric($gb[1][1][$col][0]))?$gb[1][1][$col][0]:0
+				];
+			}
+		}
+		// second pass to mark
+		foreach ($gb[0][1] as $col=>$gbitem) {
+			if ($gbitem[6]==0) { 
 				$k = $assessidx[$gbitem[7]];
 				$gb[1][1][$col][13] = 1;
-				if (isset($reqscores[$k]) && 
-				    $reqscores[$k]['aid']>0 && 
-				    isset($assesscol[$reqscores[$k]['aid']]) && 
-					(!isset($exceptions[$gbitem[7]][$limuser]) || ($exceptions[$gbitem[7]][$limuser]['waivereqscore']&1) == 0)
-				) {
-                    $colofprereq = $assesscol[$reqscores[$k]['aid']];
-                    if (empty($gb[1][1][$colofprereq][14])) {
-                        if (!isset($gb[1][1][$colofprereq][0]) || is_numeric($gb[1][1][$colofprereq][0]) && (
-                         ($reqscores[$k]['calctype']==0 && $gb[1][1][$colofprereq][0] < $reqscores[$k]['score']) ||
-                         ($reqscores[$k]['calctype']==2 && $gb[0][1][$colofprereq][2] > 0 && 100*$gb[1][1][$colofprereq][0]/$gb[0][1][$colofprereq][2]+1e-4 < $reqscores[$k]['score']))) {
-                            $gb[1][1][$col][13] = 0;
-                        }
-                    }
+				if (!empty($reqscores[$k])) {
+					$meets = meetsReqScore($reqscores[$k], false, true, $limuser);
+					if (!$meets) {
+						$gb[1][1][$col][13] = 0;
+					}
 				}
 			}
 		}

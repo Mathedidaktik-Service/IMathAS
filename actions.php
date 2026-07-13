@@ -9,6 +9,23 @@
 if (isset($CFG['hooks']['actions'])) {
 	require_once $CFG['hooks']['actions'];
 }
+function obfuscateEmail(string $email): string {
+	$emailpts = explode('@', $email);
+	if (count($emailpts)!=2) {
+		return $email;
+	}
+    [$user, $domain] = $emailpts;
+	$domainpts = explode('.', $domain, 2);
+	if (count($domainpts)!=2) {
+		return $email;
+	}
+    [$domainName, $tld] = $domainpts;
+
+    $obfuscatedUser = substr($user, 0, 2) . str_repeat('*', max(0, strlen($user) - 3)) . (strlen($user)>2?substr($user, -1):'');
+    $obfuscatedDomain = substr($domainName, 0, 1) . str_repeat('*', max(1, strlen($domainName) - 1));
+
+    return "$obfuscatedUser@$obfuscatedDomain.$tld";
+}
 
 require_once "includes/sanitize.php";
 
@@ -289,7 +306,7 @@ require_once "includes/sanitize.php";
 			$query = "SELECT id,email,rights,jsondata FROM imas_users WHERE SID=:sid";
 			$stm = $DBH->prepare($query);
 			$stm->execute(array(':sid'=>$_POST['username']));
-			list($id,$email,$rights,$jsondata) = $stm->fetch(PDO::FETCH_NUM);
+			list($id,$email,$rights,$jsondata) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null,null,null];
 			if ($id !== null) {
                 $jsondata = json_decode($jsondata,true);
 				if (isset($jsondata['lastemail']) && time() - $jsondata['lastemail'] < 60) {
@@ -334,7 +351,7 @@ require_once "includes/sanitize.php";
 				send_email($email, $sendfrom, $installname._(' Password Reset Request'), $message, array(), array(), 10);
 
 				require_once "header.php";
-				echo '<p>',_('An email with a password reset link has been sent your email address on record'),': <b>'.Sanitize::emailAddress($email).'.</b><br/> ';
+				echo '<p>',_('An email with a password reset link has been sent your email address on record'),': <b>'.Sanitize::emailAddress(obfuscateEmail($email)).'.</b><br/> ';
 				echo _('If you do not see it in a few minutes, check your spam or junk box to see if the email ended up there.'),'<br/>';
 				echo sprintf(_('It may help to add %s to your contacts list.'),'<b>'.Sanitize::encodeStringForDisplay($sendfrom).'</b>'),'</p>';
 				echo '<p>',_('If you still have trouble or the wrong email address is on file, contact your instructor - they can reset your password for you.'),'</p>';

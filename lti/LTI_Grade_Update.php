@@ -23,7 +23,7 @@ if (!defined('TOOL_HOST')) {
 class LTI_Grade_Update {
   private $dbh;
   private $access_tokens = [];
-  private $private_key = '';
+  private $private_key = [];
   private $failures = [];
   private $debug = false;
 
@@ -90,22 +90,24 @@ class LTI_Grade_Update {
    * Immediately send grade update (no ltiqueue)
    * @param  string $token            the token string
    * @param  string $score_url        the lineitem url
-   * @param  float $score             normalized to 0-1
+   * @param  float  $score            score
+   * @param  int    $ptsposs          points possible
    * @param  string $ltiuserid        the LMS provided userid; imas_ltiusers.ltiuserid
+   * @param  string  $hash            the imathas aid-userid
    * @param  string $activityProgress default 'Submitted'
    * @param  string $gradingProgress  default 'FullyGraded'
    * @param  int    $isstu            default 1
    * @param  string $comment          default ''
    * @return false|array  false on failure, or array with body and headers
    */
-  public function send_update(string $token, string $score_url, float $score,
-    string $ltiuserid, string $activityProgress='Submitted',
+  public function send_update(string $token, string $score_url, float $score, int $ptsposs,
+    string $ltiuserid, string $hash, string $activityProgress='Submitted',
     string $gradingProgress='FullyGraded', $isstu = 1, string $comment = ''
   ) {
     $pos = strpos($score_url, '?');
     $score_url = $pos === false ? $score_url . '/scores' : substr_replace($score_url, '/scores', $pos, 0);
 
-    $content = $this->get_update_body($token, $score, $ltiuserid, $isstu, null,
+    $content = $this->get_update_body($token, $score, $ptsposs, $ltiuserid, $hash, $isstu, null,
       $activityProgress, $gradingProgress, $comment);
     $this->debuglog('Sending update: '.$content['body']);
     // try to spawn a curl and don't wait for response
@@ -151,7 +153,11 @@ class LTI_Grade_Update {
         return false;
     }
     $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-    curl_close ($ch);
+    if (PHP_VERSION_ID >= 80000) {
+			unset($ch);
+		} else {
+			curl_close($ch);
+		};
 
     $resp_headers = substr($response, 0, $header_size);
     $resp_body = substr($response, $header_size);
@@ -165,8 +171,10 @@ class LTI_Grade_Update {
   /**
    * Get body and headers for grade update
    * @param  string $token            the token string
-   * @param  float $score             the score, normalized 0-1
+   * @param  float  $score            the score
+   * @param  int    $ptsposs          points possible
    * @param  string $ltiuserid        the LMS provided userid; imas_ltiusers.ltiuserid
+   * @param  string  $hash            the imathas aid-userid
    * @param  boolean    $isstu            default true
    * @param  int?   $addedon          the time the submission was added (null for default)
    * @param  string $activityProgress default 'Submitted'
@@ -174,20 +182,23 @@ class LTI_Grade_Update {
    * @param  string $comment          default ''
    * @return array [body=>, header=>]
    */
-  public function get_update_body(string $token, float $score, string $ltiuserid, 
-    $isstu = true, $addedon = null,
+  public function get_update_body(string $token, float $score, int $ptsposs, string $ltiuserid, 
+    string $hash, $isstu = true, $addedon = null,
     string $activityProgress='Submitted', string $gradingProgress='FullyGraded',
     string $comment = ''
   ) {
+    $scoreMax = max(1, $ptsposs);
     $canvasext = [
-        'new_submission' => ($isstu ? true : false)
+        'new_submission' => ($isstu ? true : false),
+        'submission_type' => 'basic_lti_launch',
+        'submission_data' => $GLOBALS['basesiteurl'] . '/lti/launch.php?submissionreview='.$hash
     ];
     if ($isstu && !empty($addedon)) {
         $canvasext['submitted_at'] = date('Y-m-d\TH:i:s.uP', $addedon);
     }
     $grade = [
       'scoreGiven' => max(0,$score),
-      'scoreMaximum' => 1,
+      'scoreMaximum' => $scoreMax,
       'timestamp' => date('Y-m-d\TH:i:s.uP'),
       'userId' => $ltiuserid,
       'activityProgress' => $activityProgress,
@@ -269,7 +280,11 @@ class LTI_Grade_Update {
     $resp = curl_exec($ch);
     $token_data = json_decode($resp, true);
     $error = curl_error($ch);
-    curl_close ($ch);
+    if (PHP_VERSION_ID >= 80000) {
+			unset($ch);
+		} else {
+			curl_close($ch);
+		};
 
     if (!empty($token_data['access_token']) && !empty($token_data['expires_in'])) {
       $this->store_access_token($platform_id, $token_data);

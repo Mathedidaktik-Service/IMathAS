@@ -101,6 +101,11 @@ $post = [
     ]
 ];
 
+if (strpos($iss, '.instructure.com')!==false) {
+    $post["https://purl.imsglobal.org/spec/lti-tool-configuration"]["messages"][0]["placements"] = ["assignment_selection"];
+    $post["https://purl.imsglobal.org/spec/lti-tool-configuration"]["https://canvas.instructure.com/lti/privacy_level"] = "public";
+}
+
 $ch = curl_init($regurl);
 $authorization = "Authorization: Bearer ".$token; // Prepare the authorisation token
 curl_setopt($ch, CURLOPT_HTTPHEADER, array($authorization, 'Content-Type: application/json')); // Inject the token into the header
@@ -113,7 +118,11 @@ curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
 curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
 
 $result = curl_exec($ch); // Execute the cURL statement
-curl_close($ch); // Close the cURL connection
+if (PHP_VERSION_ID >= 80000) {
+    unset($ch);
+} else {
+    curl_close($ch);
+}; // Close the cURL connection
 
 // Get the client_id from the registration result
 $regdata = json_decode($result, true); // Return the received data

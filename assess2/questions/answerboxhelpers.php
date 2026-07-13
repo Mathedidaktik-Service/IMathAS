@@ -214,7 +214,7 @@ function setupnosolninf($qn, $answerbox, $answer, $ansformats, $la, $ansprompt, 
 	$out .= '</div>';
 
     $answertype = 0;
-	if (preg_match('/^inf/',$answer) || $answer==='oo' || $answer===$infsoln) {
+	if ($includeinf && (preg_match('/^inf/',$answer) || $answer==='oo' || $answer===$infsoln)) {
 		$answer = $infsoln;
         $answertype = 2;
 	}
@@ -313,10 +313,12 @@ function normalizemathunicode($str) {
 		array("'", "'", '"', '"', '-', '-', '...'),
 		$str);
 	// Next, replace their Windows-1252 equivalents.
+	/*
+	// Removed because it was breaking some unicode
 	$str = str_replace(
 		array(chr(145), chr(146), chr(147), chr(148), chr(150), chr(151), chr(133)),
 		array("'", "'", '"', '"', '-', '-', '...'),
-		$str);
+		$str);*/
 
     $str = preg_replace('/\b(OO|infty)\b/i','oo', $str);
     $str = str_replace('&ZeroWidthSpace;', '', $str);
@@ -398,7 +400,9 @@ function numfuncPrepShowanswer($string, $variables) {
             $varlower = strtolower($variables[$i]);
             $isgreek = in_array($varlower, $greekletters);
             
-            if (!$isgreek && preg_match('/^(\w+)_(\w+|\(.*?\))$/', $variables[$i], $matches)) {
+			if ($varlower[-1]=="'" && in_array(substr($varlower, 0, -1), $greekletters)) {
+				continue;
+			} else if (!$isgreek && preg_match('/^(\w+)_(\w+|\(.*?\))$/', $variables[$i], $matches)) {
                 $chg = false;
                 if (strlen($matches[1]) > 1 && !in_array(strtolower($matches[1]), $greekletters)) {
                     $matches[1] = '"' . $matches[1] . '"';
@@ -433,5 +437,25 @@ function sizeToCSS($size) {
 		return (1.2*$size + 1) . 'ch';
 	} else {
 		return $size;
+	}
+}
+
+function getdimwarnmsp($displayformat, $dim) {
+	if ($displayformat == 'point') {
+		return sprintf(_('The point should have %d components'), $dim);
+	} else if ($displayformat == 'pointlist') {
+		return sprintf(_('Each point should have %d components'), $dim);
+	} else if ($displayformat == 'vector') {
+		return sprintf(_('The vector should have %d components'), $dim);
+	} else if ($displayformat == 'vectorlist') {
+		return sprintf(_('Each vector should have %d components'), $dim);
+	} else if ($displayformat == 'set') {
+		return sprintf(_('The set should have %d components'), $dim);
+	} else if ($displayformat == 'setlist') {
+		return sprintf(_('Each set should have %d components'), $dim);
+	} else if ($displayformat == 'list') {
+		return sprintf(_('Each n-tuple should have %d components'), $dim);
+	} else {
+		return sprintf(_('The n-tuple should have %d components'), $dim);
 	}
 }

@@ -96,7 +96,8 @@ $tests = [
  ['root(1/2)(8)', [], 64],
  ['root(x)(8)', ['x'=>3], 2],
  ['root(pi)(5)', [], 1.669125771],
- ['root(1/3)(-5)', [], -125]
+ ['root(1/3)(-5)', [], -125],
+ ['(2+3)-[2+3]', [], 0]
 ];
 
 $st = microtime(true);
@@ -118,6 +119,39 @@ foreach ($tests as $test) {
 $t = microtime(true) - $st;
 $tp = $t/count($tests);
 echo "Parser tests done in $t, $tp per<br><br>";
+
+
+$complextests = [
+ ['2+3i', [], [2,3]],
+ ['5(2+3i)+i*(2+i)', [], [9,17]],
+ ['e^(i*pi)', [], [-1,0]],
+ ['sqrt(4)+sqrt(-9)', [], [2,3]],
+ ['root(3)(8)',[], [2,0]],
+ ['root(3)(2+3i)', [], [1.451856618352665, 0.493403534104005]],
+ ['root(2-i)(2+3i)', [], [1.0927252, 0.830026485]],
+ ['sin(3+i)', [], [0.217759551,-1.163440363703]]
+];
+
+$st = microtime(true);
+foreach ($complextests as $test) {
+  $p = new MathParser(implode(',', array_keys($test[1])), [], '', true);
+  $out = 0;
+  try {
+    $p->parse($test[0]);
+    $out = $p->evaluate($test[1]);
+    if (abs($out[0] - $test[2][0]) > 1e-6 || abs($out[1] - $test[2][1]) > 1e-6) {
+      echo "Test failed on {$test[0]}: ".print_r($out,true).' vs '.print_r($test[2],true)."<br>";
+    }
+  } catch (Throwable $t) {
+    echo "Test crashed on {$test[0]}: ".print_r($out,true).' vs '.print_r($test[2],true)."<br>";
+    echo $t->getMessage();
+    $p->printTokens();
+  }
+}
+$t = microtime(true) - $st;
+$tp = $t/count($tests);
+echo "Complex Parser tests done in $t, $tp per<br><br>";
+
 
 $sameformtests = [
     ['(x+3)(-x+5)','(5-x)(3+x)',['x']],
@@ -143,7 +177,7 @@ $sameformtests = [
     ['(-2-3)(-4-5)','(-4-5)(-2-3)',[]],
     ['(-2-3)(-4-5)','(-5-4)(-3-2)',[]],
     ['2+3(x-4)','2-3(4-x)',['x']],
-    ['2(x+3)','2x+2*3', ['x'], 1],
+    ['2(x+3)','2x+2*3', ['x'], 1], // 1 indicates should not be considered same
     ['1/2 x', 'x/2', ['x']], // this is desirable
     ['sqrt(3)/2', '1/2 sqrt(3)', ['x']], // this is desirable
     ['(2 sqrt(3))/5', '2/5 sqrt(3)', ['x']], 
@@ -190,3 +224,128 @@ foreach ($matrixtests as $test) {
 $t = microtime(true) - $st;
 $tp = $t/count($matrixtests);
 echo "Matrix tests done in $t, $tp per<br><br>";
+
+
+$prettytests = [
+  ['3+0+4','3+4'],
+  ['3-0-4','3-4'],
+  ['4x+x^0','4x+1','x'],
+  ['x^0','1','x'],
+  ['5(x+3)^0','5','x'],
+  ['4+h_0-2','4+h_0-2','h_0'],
+  ['3+0x-2+0(x-3)^2-4-(x+4)0-1','3-2-4-1','x'],
+  ['0^3+1x-1x+1/x+1x/y','x-x+1/x+x/y','x,y'],
+  ['x^0y+x^0*y','y+y','x,y'],
+  ['3x^1+x/1+x/12','3x+x+x/12','x'],
+  ['(x+3)/1+x^1','x+3+x','x'],
+  ['1-(x)','1-x','x'],
+  ['1-(cos(x))','1-cos(x)','x'],
+  ['3(cos(x))','3cos(x)','x'],
+  ['(xy)+1','x y+1','x,y'],
+  ['(2^x)-6','2^x-6','x'],
+  ['6+(2^x)','6+2^x','x'],
+  ['6*(2^x)','6*2^x','x'],
+  ['(6)(2^x)','6*2^x','x'],
+  ['(6)(2^x+1)','6(2^x+1)','x'],
+  ['(x^2)(6)','x^2*6','x'],   
+  ['3(xy)','3x y','x,y'],
+  ['(xy)3','x y 3','x,y'],
+	['2(x)(x+3)', '2x(x+3)','x'],
+	['1-(x)', '1-x','x'],
+	['1-(x+3)', '1-(x+3)','x'],
+	['2^(x)', '2^x','x'],
+  ['(x+1)+x', '2x+1', 'x', 1],
+  ['2x+5+3y+4x-1', '6x+4+3y', 'x,y', 1],
+  ['3x+2+x+1/2', '4x+2+1/2', 'x', 1],
+  ['1/2x+1/4x+1+1/2^2', '3/4x+5/4','x',2],
+  ['2x*5x', '2x 5x','x',2],
+  ['2x*5x', '10x^2','x',3],
+  ['x*x*(x+3)', 'x^2(x+3)','x',3],
+  ['x/x^2+2*3/2', '1/x+3','x',3],
+  ['3/4*x*1/2*x + 6/8', '3/8x^2+3/4', 'x',3],
+  ['x*y*x^2*y', 'x^3y^2', 'x,y',3],
+  ['(6x^2y)/(8x)', '3/4x y', 'x,y', 3],
+  ['(6x^2y+1)/(2x)', '(6x^2y+1)/(2x)', 'x,y', 3],
+  ['(6y)/(8x)', '(3y)/(4x)', 'x,y', 3],
+  ['y/x*x^3/y^4', 'x^2/y^3', 'x,y', 3],
+  ['((x+1)(x+3)^2)/(x+3)', '(x+1)(x+3)', 'x,y', 3],
+  ["3x^2+0x+4+1(x+5)", "3x^2+9+x", "x", 1],
+  ["", "", "x", 1],
+  ["3f(1)+f(0)", "3f(1)+f(0)", "x,f", 0],
+  ["sin^2(x)-sin^-1(x)+arcsin(x)", "sin^2(x)-sin^-1(x)+arcsin(x)", "x", 0],
+  ["log_3(x)-root(3)(x)+log(x)", "log_3(x)-root(3)(x)+log(x)", "x", 0],
+  ["(log_2(x))^3", "(log_2(x))^3", "x", 0],
+  ["(sin(x))^3+sin^3(x)", "(sin(x))^3+sin^3(x)", "x", 0],
+  ["15x/3+(5pi)/3+2/3*x/5", "15x/3+(5pi)/3+2/3x/5","x", 0],
+  ["(x/y)3", "x/y 3", "x,y", 0],
+  ["(2/3)/5+(1/2)/(3/5)", "(2/3)/5+(1/2)/(3/5)", "x", 0],
+  ["(x-3)(x)(x+4)", "x(x-3)(x+4)", "x", 0],
+  ["(1/2+1/3)/(1/3-1/4)", "(5/6)/(1/12)", "x", 2],
+  ["(1/2+1/3)/(1/3-1/4)", "10", "x", 3],
+  ["2sqrt(4)x+3sqrt(1/9)y","4x+y","x,y",3],
+  ["root(3)(16)","2root(3)(2)","x",3],
+  ["log(1)+ln(1)","0","x",3],
+  ["log(10)+ln(e)+ln(e^2)+log_3(9)","6","x",3],
+  ["log(1/1000)+log(0.001)","-6","x",3],
+  ["(3+sqrt(4))/(2-sqrt(1))","5", "x", 3],
+  ["root(3)(-8)","-2","x",3],
+  ["sqrt(-8)","sqrt(-8)","x",3],
+  ["sqrt(8)/2","sqrt(2)","x",3],
+  ["(6pi)/8","(3pi)/4","x",3],
+  ["(6x)/8","(3x)/4","x",3],
+  ["(12x)/6","2x","x",3],
+  ["6x/8","3/4x","x",3],
+  ["(3x^3)/(4x)","3/4x^2", "x", 3],
+  ["(3x)/(4x^3)","3/(4x^2)", "x", 3],
+  ["(6x+4)/(2x+10)","(3x+2)/(x+5)","x",3],
+  ["(6x+4)/(2x)","(3x+2)/x","x",3],
+  ["(6x+4)/(2)","3x+2","x",3],
+  ["(-3)^2","9","x",3],
+  ["(3x-4)/(-2x)","(-3x+4)/(2x)","x",3],
+  ["(-x+4)/(-x-5)","(x-4)/(x+5)","x",3],
+  ["(-x+4)/(-x+5)","(-x+4)/(-x+5)","x",3],
+  ["(3x+2)/(-1)","-3x-2","x",3],
+  ["(3x+2)/(1)","3x+2","x",3],
+
+/* these are makexxpretty tests that are 
+   stuff the parser can't handle, since it 
+   was only intended for algebraic expressions,
+   not equations, inequalities, or ntuples.
+   For equations/inequalities, it should be 
+   possible to write a wrapper function that
+   explodes by separators, parses each section 
+   separately, then recombines.
+  ['3x=0','3x = 0','x'],
+  ['3x=0x','3x = 0','x'],
+  ['3x=-0','3x = 0','x'],
+  ['0=3x','0 = 3x','x'],
+  ['0x=3x','0 = 3x','x'],
+  ['-0=3x','0 = 3x','x'],
+  ['3x=', '3x =','x'],
+  ['3+0<1x<0x+5','3 < x <  5','x'],
+  ['x+1 leq 3', 'x+1 leq 3','x'],
+  ['(2,3)+(4,5)', '(2 , 3)+(4 , 5)']
+*/
+	
+];
+$st = microtime(true);
+foreach ($prettytests as $test) {
+    $p = new MathParser($test[2] ?? '', [], 'f');
+    $out = 0;
+    try {
+      $p->parse($test[0]);
+      $simplevel = $test[3] ?? 0;
+      // call it with "implicitMultiplication" option set to true
+      // and the simplification level from test[3] 
+      $out = $p->toPrettyString(null, true, $simplevel);
+      if ($test[1] != $out) {
+        echo "pretty L$simplevel Test failed on {$test[0]}: expected {$test[1]}, got $out.<br>";
+      }
+    } catch (Throwable $t) {
+      echo "Pretty Test crashed on {$test[0]}<br>";
+      echo $t->getMessage();
+    }
+}
+$t = microtime(true) - $st;
+$tp = $t/count($prettytests);
+echo "Pretty tests done in $t, $tp per<br><br>";

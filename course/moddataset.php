@@ -12,6 +12,7 @@
 	require_once "../init.php";
 	require_once '../includes/videodata.php';
 	require_once '../includes/htmlutil.php';
+	require_once '../includes/a11yscan.php';
 
 	if ($myrights<20) {
 		require_once "../header.php";
@@ -59,10 +60,11 @@
         $viewonly = true;
     }
 
-	$testqpage = ($cid == 0 || $courseUIver>1) ? 'testquestion2.php' : 'testquestion.php';
+	$testqpage = (!isset($courseUIver) || $courseUIver>1) ? 'testquestion2.php' : 'testquestion.php';
 
 	$outputmsg = '';
 	$errmsg = '';
+	$a11yerr = '';
 	if (isset($_POST['qtext'])) {
 		require_once "../includes/filehandler.php";
 		$now = time();
@@ -117,6 +119,8 @@
 				if (strpos($_POST['helpurl'],'ableplayer.php')!==false &&
 					strpos($_POST['helpurl'],'vtt')!==false) {
 						$captioned = 1;
+				} else if (strpos($_POST['helpurl'],'3playmedia.com')!==false) {
+					$captioned = 1;
 				} else {
 					$captioned = 0;
 				}
@@ -127,7 +131,13 @@
 				}
             }
             $helpdescr = str_replace(['!!','~~'],'',Sanitize::stripHtmlTags($_POST['helpdescr']));
-			$newextref[] = $_POST['helptype'].'!!'.trim($_POST['helpurl']).'!!'.$captioned.'!!'.$helpdescr;
+			$newextref[] = Sanitize::simpleString($_POST['helptype'])
+				. '!!'
+				. Sanitize::url(trim($_POST['helpurl']))
+				. '!!'
+				. $captioned
+				. '!!'
+				. $helpdescr;
 		}
 		$extref = implode('~~',$newextref);
 		if (isset($_POST['doreplaceby'])) {
@@ -277,8 +287,8 @@
 							$stm2->execute(array(':id'=>$_GET['id']));
 						}
 					} else if ($row[2]!=$_POST['imgvar-'.$row[0]] || $row[3]!=$_POST['imgalt-'.$row[0]]) {
-						$newvar = $_POST['imgvar-'.$row[0]];
-						$newalt = $_POST['imgalt-'.$row[0]];
+						$newvar = preg_replace('/[^\w\[\]]/','', $_POST['imgvar-'.$row[0]]);
+						$newalt = Sanitize::stripHtmlTags($_POST['imgalt-'.$row[0]]);
 						$disallowedvar = array('link','qidx','qnidx','seed','qdata','toevalqtxt','la','laarr','shanspt','GLOBALS','laparts','anstype','kidx','iidx','tips','optionsPack','partla','partnum','score','disallowedvar','allowedmacros','wherecount','countcnt','myrights','myspecialrights');
 						if (in_array($newvar,$disallowedvar)) {
 							$errmsg .= "<p>".Sanitize::encodeStringForDisplay($newvar)." is not an allowed variable name</p>";
@@ -346,8 +356,8 @@
 					if (!isset($_POST['delimg-'.$row[3]])) {
 						$_POST['imgvar-'.$row[3]] = preg_replace('/[^\w\[\]]/','', $_POST['imgvar-'.$row[3]]);
 						if ($row[0]!=$_POST['imgvar-'.$row[3]] || $row[2]!=$_POST['imgalt-'.$row[3]]) {
-							$newvar = $_POST['imgvar-'.$row[3]];
-							$newalt = $_POST['imgalt-'.$row[3]];
+							$newvar = $_POST['imgvar-'.$row[3]]; // sanitized above
+							$newalt = Sanitize::stripHtmlTags($_POST['imgalt-'.$row[3]]);
 							$disallowedvar = array('link','qidx','qnidx','seed','qdata','toevalqtxt','la','laarr','shanspt','GLOBALS','laparts','anstype','kidx','iidx','tips','optionsPack','partla','partnum','score','disallowedvar','allowedmacros','wherecount','countcnt','myrights','myspecialrights');
 							if (!in_array($newvar,$disallowedvar)) {
 								$row[0] = $newvar;
@@ -376,7 +386,7 @@
 			//upload image files if attached
 			if (!empty($_FILES['imgfile']['name'])) {
 				$disallowedvar = array('link','qidx','qnidx','seed','qdata','toevalqtxt','la','GLOBALS','laparts','anstype','kidx','iidx','tips','options','partla','partnum','score');
-				$_POST['newimgvar'] = preg_replace('/[^\w\[\]]/','', $_POST['newimgvar']);
+				$newvar = preg_replace('/[^\w\[\]]/','', $_POST['newimgvar']);
 				if (!is_uploaded_file($_FILES['imgfile']['tmp_name'])) {
 					switch($_FILES['imgfile']['error']){
 					case 1:
@@ -390,9 +400,9 @@
 					  $errmsg .= _("There was a problem with your upload.");
 					  break;
 						}
-				} else if (trim($_POST['newimgvar'])=='') {
+				} else if (trim($newvar)=='') {
 					$errmsg .= "<p>"._("Need to specify variable for image to be referenced by")."</p>";
-				} else if (in_array($_POST['newimgvar'],$disallowedvar)) {
+				} else if (in_array($newvar,$disallowedvar)) {
 					$errmsg .= "<p>".sprintf(_("%s is not an allowed variable name"),Sanitize::encodeStringForDisplay($newvar))."</p>";
 				} else {
 					$uploaddir = rtrim(dirname(__FILE__), '/\\') .'/../assessment/qimages/';
@@ -418,8 +428,9 @@
 						if (($filename=storeuploadedqimage('imgfile',$filename))!==false) {
 						//if (move_uploaded_file($_FILES['imgfile']['tmp_name'], $uploadfile)) {
 							//echo "<p>File is valid, and was successfully uploaded</p>\n";
+							$newalt = Sanitize::stripHtmlTags($_POST['newimgalt']);
 							$stm = $DBH->prepare("INSERT INTO imas_qimages (var,qsetid,filename,alttext) VALUES (:var, :qsetid, :filename, :alttext)");
-							$stm->execute(array(':var'=>$_POST['newimgvar'], ':qsetid'=>$qsetid, ':filename'=>$filename, ':alttext'=>$_POST['newimgalt']));
+							$stm->execute(array(':var'=>$newvar, ':qsetid'=>$qsetid, ':filename'=>$filename, ':alttext'=>$newalt));
 							$stm = $DBH->prepare("UPDATE imas_questionset SET hasimg=1 WHERE id=:id");
 							$stm->execute(array(':id'=>$qsetid));
 						} else {
@@ -646,7 +657,7 @@
 					$inlibs[] = $row[0];
 				}*/
 				$locklibs = array();
-				$addmod = _("Add");
+				$addmod = _("Add Question");
 				$stm = $DBH->prepare("SELECT qrightsdef FROM imas_users WHERE id=:id");
                 $stm->execute(array(':id'=>$userid));
                 $qrightsdef = $stm->fetchColumn(0);
@@ -686,7 +697,7 @@
 						$locklibs[] = $row[0];
 					}
 				}
-				$addmod = _("Modify");
+				$addmod = _("Modify Question");
 				//$query = "SELECT count(imas_questions.id) FROM imas_questions,imas_assessments,imas_courses WHERE imas_assessments.id=imas_questions.assessmentid ";
 				//$query .= "AND imas_assessments.courseid=imas_courses.id AND imas_questions.questionsetid=:questionsetid AND imas_courses.ownerid<>:userid";
 				$query = "SELECT imas_questions.id FROM imas_questions,imas_assessments,imas_courses WHERE imas_assessments.id=imas_questions.assessmentid ";
@@ -766,14 +777,14 @@
 				} else {$inlibs = '0';}
 			}
 
-			$addmod = _("Add");
+			$addmod = _("Add Question");
 	}
     $canedit = $myq;
     if ($viewonly) {
         $canedit = false;
     }
 	if (!$canedit) {
-		$addmod = _('View');
+		$addmod = _('View Question Code');
 	}
 
 	$inlibssafe = implode(',', array_map('intval', explode(',',$inlibs)));
@@ -799,6 +810,33 @@
         $olnames = implode(", ",$olnames);
     }
 
+	$a11yscan = new A11yScanner($DBH, $cid);
+	$a11yscan->scan($line['control'].';;'.$line['qtext'], '', '', '');
+	$a11yscan->a11ycheckvids();
+	$errors = $a11yscan->geterrors();
+	$a11yerr = '';
+	foreach ($errors[1] as $err) {
+		$a11yerr .= Sanitize::encodeStringForDisplay($err[0]).'. ';
+	}
+	if (count($extref)>0) {
+		for ($i=0;$i<count($extref);$i++) {
+			$extrefpt = explode('!!',$extref[$i]);
+			if ($extrefpt[0]=='video' && count($extrefpt)>2 && $extrefpt[2]==0) {
+				$a11yerr .= sprintf(_('Uncaptioned video (%s). '), Sanitize::encodeStringForDisplay($extrefpt[1]));
+			}
+		}
+	}
+	if (!empty($images['alttext'])) {
+		foreach ($images['alttext'] as $imn=>$alt) {
+			if (empty($alt)) {
+				$a11yerr .= sprintf(_('Blank alt text on image variable %s'), Sanitize::encodeStringForDisplay($images['vars'][$imn]));
+			}
+		}
+	}
+	if ($a11yerr !== '') {
+		$a11yerr = '<span class="noticetext">'._('Potential Accessibility Issue:').'</span> '.$a11yerr;
+	}
+
 	// Build form action
 	$formAction = "moddataset.php?process=true"
 		. (isset($_GET['cid']) ? "&cid=$cid" : "")
@@ -817,14 +855,15 @@
 		$qsPacket['images'] = $images; //  Images array
 		$qsPacket['outputmsg'] = $outputmsg; // output message
 		$qsPacket['errmsg'] = $errmsg;
+		$qsPacket['a11yerr'] = $a11yerr;
 		$extrefqs = array();
 		for ($i=0;$i<count($extref);$i++) {
 			$extrefpt = explode('!!',$extref[$i]);
-			$type = ucfirst($extrefpt[0]);
+			$type = ucfirst(Sanitize::simpleString($extrefpt[0]));
 			if ($extrefpt[0]=='video' && count($extrefpt)>2 && $extrefpt[2]==1) {
 				$type .= ' (cc)';
 			}
-            $extrefqs[$i] = array($type,$extrefpt[1]);
+            $extrefqs[$i] = array($type,Sanitize::encodeUrlForHref($extrefpt[1]));
             if (!empty($extrefpt[3])) {
                 $extrefqs[$i][2] = Sanitize::encodeStringForDisplay($extrefpt[3]);
             }
@@ -847,7 +886,7 @@
 
 	$useeditor = "noinit";
 	$placeinhead .= '<script type="text/javascript" src="'.$staticroot.'/javascript/codemirror/codemirror-compressed.js?v=091522"></script>';
-	$placeinhead .= '<script type="text/javascript" src="'.$staticroot.'/javascript/codemirror/imathas.js?v=012326"></script>';
+	$placeinhead .= '<script type="text/javascript" src="'.$staticroot.'/javascript/codemirror/imathas.js?v=070426"></script>';
 	$placeinhead .= '<link rel="stylesheet" href="'.$staticroot.'/javascript/codemirror/codemirror_min.css?v=091522">';
 
 	//$placeinhead .= '<script src="//sagecell.sagemath.org/embedded_sagecell.js"></script>'.PHP_EOL;
@@ -864,176 +903,14 @@
 	} else {
 		$placeinhead .= 'var originallicense = -1;';
 	}
+	$placeinhead .=  'var initFormAction = "' . $formAction . '";';
+	$placeinhead .= 'var basetestaddr = "' . $imasroot. '/course/'.$testqpage.'?cid='.$cid.'&qsetid=";';
+	$placeinhead .= 'var inittestaddr = basetestaddr +"'.Sanitize::encodeUrlParam($_GET['id'] ?? 0).'";';
+	$placeinhead .= 'var canedit = ' . ($canedit ? "true" : "false") . ';';
 
-	$placeinhead .= '
-	   var controlEditor;
-	   var qEditor = [];
+	$placeinhead .= '</script>';
+	$placeinhead .= '<script type="text/javascript" src="'.$staticroot.'/javascript/moddataset.js?v=060926"></script>';
 
-	  function toggleeditor(el) {
-	     var qtextbox =  document.getElementById(el);
-	     if ((el=="qtext" && editoron==0) || (el=="solution" && seditoron==0)) {
-	        if (typeof qEditor[el] != "undefined") {
-	     		qEditor[el].toTextArea();
-	     	}
-	        qtextbox.rows += 3;
-	        qtextbox.value = qtextbox.value.replace(/<span\s+class="AM"[^>]*>(.*?)<\\/span>/g,"$1");
-	        qtextbox.value = qtextbox.value.replace(/`(.*?)`/g, function(match,p1,offset,string) {
-				let before = string.substring(0, offset);
-				let lastOpenTag = before.lastIndexOf("<");
-				let lastCloseTag = before.lastIndexOf(">");
-				if (lastOpenTag > lastCloseTag) {
-					return match; // in tag; do not replace
-				} else {
-					return "<span class=\"AM\" title=\"" + p1 + "\">`" + p1 + "`</span>";
-				}
-			});
-	        qtextbox.value = qtextbox.value.replace(/\n\n/g,"<br/><br/>");
-
-			initeditor("exact",el);
-			if (el=="qtext") {
-				editoron = 1;
-			} else if (el=="solution") {
-				seditoron = 1;
-			}
-	     } else if ((el=="qtext" && editoron==1) || (el=="solution" && seditoron==1)) {
-	     	tinymce.remove("#"+el);
-	     	qtextbox.rows -= 3;
-	     	qtextbox.value = qtextbox.value.replace(/<span\s+class="AM"[^>]*>(.*?)<\\/span>/g,"$1").replace(/&#96;/g,"`");
-	     	setupQtextEditor(el);
-			if (el=="qtext") {
-				editoron = 0;
-			} else if (el=="solution") {
-				seditoron = 0;
-			}
-	     }
-	   }
-	   function initsolneditor() {
-	   	/*
-	   	if (document.cookie.match(/seditoron=1/)) {
-	   		var val = document.getElementById("solution").value;
-	   		if (val.length<3 || val.match(/<.*?>/)) {toggleeditor("solution");}
-	   		else {setupQtextEditor("solution");}
-	   	}else {setupQtextEditor("solution");}
-	   	*/
-	   }
-
-	   addLoadEvent(function(){setupQtextEditor("qtext");setupQtextEditor("solution");});
-	   $(function() {
-		$("#mainform").on("submit", function(e) {
-			e.preventDefault();
-			if (saveEditors()) {
-				e.target.submit();
-			}
-		});
-	   });
-	   /*
-	   if (document.cookie.match(/qeditoron=1/)) {
-	   	var val = document.getElementById("qtext").value;
-	   	if (val.length<3 || val.match(/<.*?>/)) {toggleeditor("qtext");}
-	   	else {setupQtextEditor("qtext");}
-	   }else {setupQtextEditor("qtext");}});
-	   */
-
-	   function setupQtextEditor(id) {
-	   	var qtextbox = document.getElementById(id);
-	   	if (!qtextbox) { return; }
-		qtextbox.value = qtextbox.value.replace(/\s*((<br\s*\/>\s*){1,}<br\s*\/>)\s*/g, "\n$1\n");
-	   	qEditor[id] = CodeMirror.fromTextArea(qtextbox, {
-			matchTags: true,
-			mode: "imathasqtext",
-			smartIndent: true,
-			lineWrapping: true,
-			indentUnit: 2,
-			tabSize: 2,
-            viewportMargin: 500,
-			'.(!$canedit?'readOnly:true,':'').'
-			styleSelectedText:true
-		  });
-		  for (var i=0;i<qEditor[id].lineCount();i++) { qEditor[id].indentLine(i); }
-	   }
-
-	   $(function() {
-	   	controlEditor = CodeMirror.fromTextArea(document.getElementById("control"), {
-			lineNumbers: true,
-			matchBrackets: true,
-			autoCloseBrackets: true,
-			mode: "text/x-imathas",
-			smartIndent: true,
-			lineWrapping: true,
-			indentUnit: 2,
-			tabSize: 2,
-            viewportMargin: 500,
-			'.(!$canedit?'readOnly:true,':'').'
-			styleSelectedText:true
-		      });
-		//controlEditor.setSize("100%",6+14*document.getElementById("control").rows);
-	   });
-
-
-	   function checklicense() {
-	   	var lic = $("#license").val();
-	   	var warn = "";
-	   	if (originallicense>-1) {
-	   		if (originallicense==0 && lic != 0) {
-	   			warn = "'._('If the original question contained copyrighted material, you should not change the license unless you have removed all the copyrighted material').'";
-	   		} else if ((originallicense == 1 ||  originallicense == 3 ||  originallicense == 4) && lic != originallicense) {
-	   			warn = "'._('The original license REQUIRES that all derivative versions be kept under the same license. You should only be changing the license if you are the creator of this questions and all questions it was derived from').'";
-	   		}
-	   	}
-	   	$("#licensewarn").html("<br/>"+warn);
-	   }
-	   function changea11ytype() {
-	     let val = document.getElementById("a11yalttype").value;
-		 if (val > 0) {
-		 	$("#a11yaltwarn").show();
-		 } else {
-			$("#a11yaltwarn").hide();
-		 }
-       }
-	   function incctrlboxsize() {
-	   	$("#ccbox").find(".CodeMirror-scroll").css("min-height",0).css("max-height","none");
-	   	controlEditor.setSize("100%",$(controlEditor.getWrapperElement()).height()+28);
-	   }
-	   function decctrlboxsize() {
-	  	 $("#ccbox").find(".CodeMirror-scroll").css("min-height",0).css("max-height","none");
-	   	controlEditor.setSize("100%",$(controlEditor.getWrapperElement()).height()-28);
-	   }
-	   function incqtboxsize(id) {
-	   	if (!editoron) {
-	   		$("#"+id).parent().find(".CodeMirror-scroll").css("min-height",0).css("max-height","none");
-	   		qEditor[id].setSize("100%",$(qEditor[id].getWrapperElement()).height()+28);
-	   		document.getElementById(id).rows += 2;
-	   	}
-	   }
-	   function decqtboxsize(id) {
-	   	if (!editoron) {
-	   		$("#"+id).parent().find(".CodeMirror-scroll").css("min-height",0).css("max-height","none");
-	   		qEditor[id].setSize("100%",$(qEditor[id].getWrapperElement()).height()-28);
-	   		document.getElementById(id).rows -= 2;
-	   	}
-	   }
-        $(function() {
-          $("#qtypedd a[data-sn]").on("click", function(e) {
-            $("#qtypedd dd-active").removeClass("dd-active");
-            selectqtype(this.getAttribute("data-sn"));
-            $("#qtype").val(this.getAttribute("data-sn"));
-          });
-        });
-        function selectqtype(sn) {
-            // close all second-levels
-            $(".dropdown-submenu").removeClass("open");
-            $("#qtypedd a").removeClass("dd-active").attr("aria-expanded",false);
-            var selel = $("#qtypedd a[data-sn=" + sn + "]");
-            selel.addClass("dd-active"); 
-            selel.closest(".dropdown-submenu").addClass("open").children("a").addClass("dd-active").attr("aria-expanded",true);
-            var longname = selel.text();
-            if (selel.attr("data-ln")) {
-                longname = selel.attr("data-ln");
-            }
-            $("#qtypedd > button.dropdown-toggle").html(longname + " <span class=\'arrow-down\'></span>");
-        }
-        $(function() { selectqtype($("#qtype").val()); });
-	   </script>';
 	$placeinhead .= "<script src=\"$staticroot/javascript/solver.js?ver=110621\" type=\"text/javascript\"></script>\n";
 	$placeinhead .= '<style type="text/css">.CodeMirror {font-size: medium;border: 1px solid #ccc;}
 		#ccbox .CodeMirror, #qtbox .CodeMirror {height: auto; clip-path: inset(0px);}
@@ -1052,30 +929,32 @@
 
 	if (isset($_GET['aid'])) {
 		echo "<div class=breadcrumb>$breadcrumbbase <a href=\"course.php?cid=$cid\">".Sanitize::encodeStringForDisplay($coursename)."</a> ";
-		echo "&gt; <a href=\"$addq.php?aid=".Sanitize::onlyInt($_GET['aid'])."&cid=$cid\">"._("Add/Remove Questions")."</a> &gt; "._("Modify Questions")."</div>";
+		echo "&gt; <a href=\"$addq.php?aid=".Sanitize::onlyInt($_GET['aid'])."&cid=$cid\">"._("Add/Remove Questions")."</a> &gt; ".Sanitize::encodeStringForDisplay($addmod)."</div>";
 
 	} else if (isset($_GET['daid'])) {
 		echo "<div class=breadcrumb>$breadcrumbbase <a href=\"course.php?cid=$cid\">".Sanitize::encodeStringForDisplay($coursename)."</a> ";
-		echo "&gt; <a href=\"adddrillassess.php?daid=".Sanitize::encodeUrlParam($_GET['daid'])."&cid=$cid\">"._("Add Drill Assessment")."</a> &gt; "._("Modify Questions")."</div>";
+		echo "&gt; <a href=\"adddrillassess.php?daid=".Sanitize::encodeUrlParam($_GET['daid'])."&cid=$cid\">"._("Add Drill Assessment")."</a> &gt; ".Sanitize::encodeStringForDisplay($addmod)."</div>";
 	} else {
 		if ($cid==="admin") {
 			echo "<div class=breadcrumb>$breadcrumbbase <a href=\"../admin/admin2.php\">Admin</a> ";
-			echo "&gt; <a href=\"manageqset.php?cid=admin\">"._("Manage Question Set")."</a> &gt; "._("Modify Question")."</div>\n";
+			echo "&gt; <a href=\"manageqset.php?cid=admin\">"._("Manage Question Set")."</a> &gt; ".Sanitize::encodeStringForDisplay($addmod)."</div>\n";
 		} else {
 			echo "<div class=breadcrumb><a href=\"../index.php\">"._("Home")."</a> ";
 			if ($cid>0) {
 				echo "&gt; <a href=\"course.php?cid=$cid\">".Sanitize::encodeStringForDisplay($coursename)."</a>";
 			}
-			echo " &gt; <a href=\"manageqset.php?cid=$cid\">"._("Manage Question Set")."</a> &gt; "._("Modify Question")."</div>\n";
+			echo " &gt; <a href=\"manageqset.php?cid=$cid\">"._("Manage Question Set")."</a> &gt; ".Sanitize::encodeStringForDisplay($addmod)."</div>\n";
 		}
 
 	}
-	echo "<div id='errmsgContainer'>$errmsg</div>";
-	echo "<div id='outputmsgContainer'>$outputmsg</div>";
 
 	echo '<div id="headermoddataset" class="pagetitle">';
-	echo "<h1>" . Sanitize::encodeStringForDisplay($addmod) . ": "._("QuestionSet Question"),"</h1>\n";
+	echo "<h1>" , Sanitize::encodeStringForDisplay($addmod) ,"</h1>\n";
 	echo '</div>';
+
+	echo "<div id='errmsgContainer' class='noticetext".($errmsg==''?'':' cpmid')."'>$errmsg</div>";
+	echo "<div id='outputmsgContainer'".($outputmsg==''?'':' class=cpmid').">$outputmsg</div>";
+	echo "<div id='a11yerrContainer' class='".($a11yerr==''?'':' cpmid')."'>$a11yerr</div>";
 
 	if (strpos($line['control'],'end stored values - Tutorial Style')!==false) {
 		echo '<p>'._('This question appears to be a Tutorial Style question.').'  <a href="modtutorialq.php?'.Sanitize::encodeStringForDisplay($_SERVER['QUERY_STRING']).'">'._('Open in the tutorial question editor').'</a></p>';
@@ -1118,7 +997,7 @@ if ($viewonly) {
 ?>
 <input type="hidden" name="hasimg" value="<?php echo Sanitize::encodeStringForDisplay($line['hasimg']);?>"/>
 <p>
-<label for=description><?php echo _('Description');?></label>:<br/>
+<label for=description><?php echo _('Description');?></label>:<br>
 <textarea cols=60 rows=4 name=description id=description <?php if (!$canedit) echo "disabled";?>><?php echo Sanitize::encodeStringForDisplay($line['description'], true);?></textarea>
 </p>
 <p>
@@ -1143,7 +1022,7 @@ if (!isset($line['ownerid']) || isset($_GET['template']) || $line['ownerid']==$u
 	echo "<option value=\"4\" ";
 	if ($line['userights']==4) {echo "SELECTED";}
 	echo ">"._("Allow use by all and modifications by all")."</option>\n";
-	echo '</select><br/>';
+	echo '</select><br>';
 	echo '<label for=license>' . _('License:').'</label> <select name="license" id="license" onchange="checklicense()">';
 	echo '<option value="0" '.($line['license']==0?'selected':'').'>Copyrighted</option>';
 	echo '<option value="1" '.($line['license']==1?'selected':'').'>IMathAS / WAMAP / MyOpenMath Community License (GPL + CC-BY)</option>';
@@ -1152,14 +1031,14 @@ if (!isset($line['ownerid']) || isset($_GET['template']) || $line['ownerid']==$u
 	echo '<option value="4" '.($line['license']==4?'selected':'').'>Creative Commons Attribution-ShareAlike</option>';
 	echo '</select><span id="licensewarn" class=noticetext style="font-size:80%;"></span>';
 	if ($line['otherattribution']=='') {
-		echo '<br/><a href="#" onclick="$(\'#addattrspan\').show();$(this).hide();return false;">'._('Add additional attribution').'</a>';
+		echo '<br><a href="#" onclick="$(\'#addattrspan\').show();$(this).hide();return false;">'._('Add additional attribution').'</a>';
 		echo '<span id="addattrspan" style="display:none;">';
 	} else {
-		echo '<br/><span id="addattrspan">';
+		echo '<br><span id="addattrspan">';
 	}
 	echo '<label for=addattr>'._('Additional Attribution').'</label>: <input type="text" size="80" name="addattr" id="addattr" value="'.Sanitize::encodeStringForDisplay($line['otherattribution'], true).'"/>';
 	if ($line['otherattribution']!='') {
-		echo '<br/><span class=noticetext style="font-size:80%">'._('You should only modify the attribution if you are SURE you are removing all portions of the question that require the attribution').'</span>';
+		echo '<br><span class=noticetext style="font-size:80%">'._('You should only modify the attribution if you are SURE you are removing all portions of the question that require the attribution').'</span>';
 	}
 	echo '</span>';
     echo '</p>';
@@ -1168,48 +1047,9 @@ if (!isset($line['ownerid']) || isset($_GET['template']) || $line['ownerid']==$u
 <script>
 var curlibs = '<?php echo Sanitize::encodeStringForJavascript($inlibs);?>';
 var locklibs = '<?php echo Sanitize::encodeStringForJavascript($locklibs);?>';
-function libselect() {
-	GB_show('<?php echo _('Library Select');?>','libtree3.php?cid=<?php echo $cid;?>&libtree=popup&selectrights=1&libs='+curlibs+'&locklibs='+locklibs,500,500);
-}
-function setlib(libs) {
-	if (libs.charAt(0)=='0' && libs.indexOf(',')>-1) {
-		libs = libs.substring(2);
-	}
-	document.getElementById("libs").value = libs;
-	curlibs = libs;
-}
-function setlibnames(libn) {
-	if (libn.indexOf('Unassigned')>-1 && libn.indexOf(',')>-1) {
-		libn = libn.substring(11);
-	}
-	document.getElementById("libnames").textContent = libn;
-	$("#libonlysubmit").show();
-}
-function swapentrymode() {
-	var butn = document.getElementById("entrymode");
-	if (butn.value=="2-box entry") {
-		document.getElementById("qcbox").style.display = "none";
-		document.getElementById("abox").style.display = "none";
-		document.getElementById("control").rows = 20;
-		butn.value = "4-box entry";
-	} else {
-		document.getElementById("qcbox").style.display = "block";
-		document.getElementById("abox").style.display = "block";
-		document.getElementById("control").rows = 10;
-		butn.value = "2-box entry";
-	}
-}
-function incboxsize(box) {
-	document.getElementById(box).rows += 2;
-}
-function decboxsize(box) {
-	if (document.getElementById(box).rows > 2)
-		document.getElementById(box).rows -= 2;
-}
-
 </script>
 <p>
-<?php echo _('My library assignments:'); ?> <span id="libnames"><?php echo Sanitize::encodeStringForDisplay($lnames);?></span><input type=hidden name="libs" id="libs" size="10" value="<?php echo Sanitize::encodeStringForDisplay($inlibs);?>">
+<?php echo _('My library assignments:'); ?> <span id="libnames"><?php echo Sanitize::encodeStringForDisplay($lnames);?></span><input type=hidden name="libs" id="libs" value="<?php echo Sanitize::encodeStringForDisplay($inlibs);?>">
 <button type="button" onClick="libselect()"><?php echo _("Select Libraries"); ?></button>
 <?php
 if (isset($_GET['id']) && $canedit) {
@@ -1336,17 +1176,17 @@ if ($line['solution']=='') {
 <button type="submit"><?php echo _("Save"); ?></button>
 <input type=submit name=test value="Save and Test Question" class="saveandtest" />
 <button type="button" class="quickSaveButton" onclick="quickSaveQuestion()"><?php echo _('Quick Save and Preview'); ?></button>
-<br/>
+<br>
 <label><input type="checkbox" name="usesrand" value="1" <?php if (($line['solutionopts']&1)==1) {echo 'checked="checked"';};?>
    onclick="$('#userandnote').toggle()">
 <?php echo _('Uses random variables from the question, or question is not randomized.'); ?></label>
  <span id="userandnote" <?php if (($line['solutionopts']&1)==1) {echo 'style="display:none;"';}?>>
    <i><?php echo _('Be sure to include the question you are solving in the text'); ?></i>
- </span><br/>
+ </span><br>
 <label><input type="checkbox" name="useashelp" value="2" <?php if (($line['solutionopts']&2)==2) {echo 'checked="checked"';};?>>
-<?php echo _('Use this as a "written example" help button'); ?></label><br/>
+<?php echo _('Use this as a "written example" help button'); ?></label><br>
 <label><input type="checkbox" name="usewithans" value="4" <?php if (($line['solutionopts']&4)==4) {echo 'checked="checked"';};?>>
-<?php echo _('Display with the "Show Answer"'); ?></label><br/>
+<?php echo _('Display with the "Show Answer"'); ?></label><br>
 <textarea style="width: 100%" cols=60 rows=<?php echo min(35,max(10,substr_count($line['solution'],"\n")+1));?> id="solution" name="solution" <?php if (!$canedit) echo "readonly=\"readonly\"";?>><?php echo Sanitize::encodeStringForDisplay($line['solution'], true);?></textarea>
 </div>
 <div id=imgbox>
@@ -1356,7 +1196,7 @@ if ($line['solution']=='') {
   <label for=newimgvar><?php echo _('assign to variable:'); ?></label> 
     <input type="text" name="newimgvar" id="newimgvar" size="6" <?php if (!$canedit) {echo 'disabled';};?>/>
   <label for="newimgalt"><?php echo _('Description:'); ?></label> 
-    <textarea rows=1 cols=30 name="newimgalt" id="newimgalt" <?php if (!$canedit) {echo 'disabled';};?>></textarea><br/>
+    <textarea rows=1 cols=30 name="newimgalt" id="newimgalt" <?php if (!$canedit) {echo 'disabled';};?>></textarea><br>
 <div id="imgListContainer" style="display:<?php echo (isset($images['vars']) && count($images['vars'])>0) ? 'block' : 'none'; ?>">
 	<?php echo _('Images:'); ?>
 	<ul id='imgList'>
@@ -1386,13 +1226,13 @@ if (isset($images['vars']) && count($images['vars'])>0) {
  </select>
  <label for=helpurl><?php echo _('URL')?></label>: <input type="text" name="helpurl" id="helpurl" size="30" <?php if (!$canedit) {echo 'disabled';};?>/>
  <label for=helpdescr><?php echo _('Description')?></label>: <input type="text" name="helpdescr" id="helpdescr" size="30" <?php if (!$canedit) {echo 'disabled';};?>/>
- <br/>
+ <br>
 <?php
 echo '<div id="helpbtnwrap" ';
 if (count($extref)==0) {
 	echo 'class="hidden"';
 }
-echo ">"._("Help buttons:")."<br/>";
+echo ">"._("Help buttons:")."<br>";
 echo '<ul id="helpbtnlist">';
 if (count($extref)>0) {
 	for ($i=0;$i<count($extref);$i++) {
@@ -1422,7 +1262,7 @@ echo '</p>';
 if ($canedit && $bada11yreviews>0) {	
 	echo '<p class="a11ynegrev">'.sprintf(_('This question has received %d "needs work" accessibility reviews.'), $bada11yreviews).' ';
 	echo _('If you have fixed the issues, you can clear the accessibility reviews.');
-	echo '<br/><label><input type=checkbox name=cleara11yreviews value=1 /> '._('Clear all accessiblity reviews').'</label></p>';
+	echo '<br><label><input type=checkbox name=cleara11yreviews value=1 /> '._('Clear all accessiblity reviews').'</label></p>';
 }
 
 if ($myrights==100) {
@@ -1449,175 +1289,6 @@ if ($line['deleted']==1 && ($myrights==100 || $line['ownerid']==$userid)) {
 </p>
 </form>
 
-<script type="text/javascript">
-$("input[name=imgfile]").on("change", function(event) {
-	var maxsize = $("input[name=MAX_FILE_SIZE]").val();
-	if (this.files && this.files[0] && this.files[0].size>maxsize) {
-		alert("Your image is too large. Size cannot exceed "+maxsize+" btyes");
-		$(this).val("");
-	}
-});
-
-function saveEditors() {
-	try {
-		if (controlEditor) controlEditor.save();
-		if (window.tinymce) {
-			if (editoron) {
-				tinymce.get("qtext").save();
-			} else {
-				qEditor["qtext"].save();
-			}
-			if (seditoron) {
-				tinymce.get("solution").save();
-			} else {
-				qEditor["solution"].save();
-			}
-		} else {
-			for (i in qEditor) { qEditor[i].save(); }
-		}
-		return true;
-	} catch (err){
-		quickSaveQuestion.errorFunc();
-		return false;
-		
-	}
-}
-if (FormData){ // Only allow quicksave if FormData object exists
-	var quickSaveQuestion = function(){
-		// Add text to notice areas
-		$(".quickSaveNotice").html("Saving...");
-
-		// Save codemirror and tinymce data
-		if (!saveEditors()) {
-			return;
-		}
-
-		// Get form data
-		var data = new FormData($("form")[0]);
-
-		$.ajax({
-			url: quickSaveQuestion.url + "&quick=1",
-			type: 'POST',
-			data: data,
-			contentType: false,
-			processData: false,
-			success: function(res){
-				// Parse out response string
-				var res = JSON.parse(res);
-				var formAction = res.formAction;
-				var images = res.images;
-				// Change form action url and testing address
-				if (formAction.indexOf("moddataset.php") > -1) {
-					quickSaveQuestion.url = formAction;
-					quickSaveQuestion.testAddr = '<?php echo "$imasroot/course/$testqpage?cid=$cid&qsetid="; ?>' + res.id
-				} else {
-					quickSaveQuestion.errorFunc();
-				}
-				// Change form action and url in address bar
-				$("form")[0].action = quickSaveQuestion.url;
-				if (window.history.replaceState) window.history.replaceState({}, "qs", quickSaveQuestion.url);
-				// Change outputmsg and errmsg
-				$("#outputmsgContainer").html(res.outputmsg);
-				$("#errmsgContainer").html(res.errmsg);
-				// HANDLE IMAGES
-				var imgUploaded = $("input[name='imgfile']")[0].files.length > 0 ? true : false; // Image uploaded
-				var imgDeleted = $("input[name^='delimg-']:checked").length > 0 ? true : false; // Image deleted
-				if (Object.keys(images.vars).length>0 || imgUploaded || imgDeleted) {
-					// Clear image inputs
-					var imgFile = $("input[name='imgfile']");
-					imgFile.replaceWith( imgFile = imgFile.val('').clone(true));
-					$("input[name='newimgvar'], input[name='newimgalt']").val('');
-
-					// Update image list
-					$("#imgList").empty();
-					var imgCount = 0;
-					for (id in images.vars){
-						imgCount++;
-						$("#imgList").append(
-							"<li><label>Variable: <input type='text' name='imgvar-" + id + "' value='$" + images.vars[id] + "' size='10' /></label>" +
-							" <a href='" + res.imgUrlBase + images.files[id] + "' target='_blank'>View</a>" +
-							" <label>Description: <textarea rows=1 cols=30 name='imgalt-" + id + "'>" + images.alttext[id] + "</textarea></label>" +
-							" <label><input type='checkbox' name='delimg-" + id + "'/> Delete?</label>" +
-							"</li>"
-						);
-					}
-				} else { // No uploads/deletes: still count number of images
-					var imgCount = 0;
-					for (i in images.vars) imgCount++;
-				}
-				// Hide image list if no images in question
-				$("#imgListContainer").css("display", imgCount > 0 ? "block" : "none");
-
-				//handle extref help buttons
-				if (res.extref.length>0) {
-					$("#helpbtnlist").html('');
-					for (var i=0;i<res.extref.length;i++) {
-						$("#helpbtnlist").append("<li>Type: "+res.extref[i][0] +
-                            ", URL: <a href='"+res.extref[i][1]+"'>"+res.extref[i][1]+"</a>. " +
-                            ((res.extref[i][2]) ? (_("Description")+": "+res.extref[i][2]+". "):"") +
-							"<label><input type=\"checkbox\" name=\"delhelp-"+i+"\"/>" + _("Delete?") + "</label></li>");
-					}
-					$("#helpbtnwrap").removeClass("hidden");
-				} else {
-					$("#helpbtnwrap").addClass("hidden");
-				}
-				$("input[name=helpurl],input[name=helpdescr]").val('');
-
-				// Empty notices
-				$(".quickSaveNotice").empty();
-				if (data.get('cleara11yreviews') == 1) {
-					$(".a11ynegrev").hide();
-				}
-				// Load preview page
-				let leftpos = screen.left ?? screen.availLeft ?? 0;
-    			let toppos = screen.top ?? screen.availTop ?? 0;
-
-				var previewpop = window.open(quickSaveQuestion.testAddr, 'Testing', 'width='+(.4*screen.width)+',height='+(.8*screen.height)+',scrollbars=1,resizable=1,status=1,top='+(20+toppos)+',left='+(.6*screen.width-20+leftpos));
-				previewpop.focus();
-			},
-			error: function(res){
-				quickSaveQuestion.errorFunc();
-			}
-		});
-	}
-	quickSaveQuestion.url = "<?php echo $formAction; // Sanitized near line 806 ?>&quick=1";
-	quickSaveQuestion.testAddr = '<?php echo "$imasroot/course/$testqpage?cid=$cid&qsetid=".Sanitize::encodeUrlParam($_GET['id'] ?? 0); ?>';
-	// Method to handle errors...
-	quickSaveQuestion.errorFunc = function(){
-		$(".quickSaveNotice").html("Error with Quick Save: try again, or use the \"Save\" option.");
-	}
-	// Key-binding method
-	quickSaveQuestion.keyBind = function(e){
-		var key = e.which || e.keyCode;
-		if (key == 83 && e.ctrlKey == true){
-			e.preventDefault();
-			e.stopPropagation();
-			quickSaveQuestion();
-			return false;
-		}
-	}
-	// Bind key event
-	$(document).on("keydown", quickSaveQuestion.keyBind);
-	// A little trickier for tinymce due to race conditions
-	var mceTry = setInterval(function(){
-		try {
-			tinymce.get('qtext').on('keydown', quickSaveQuestion.keyBind);
-			clearInterval(mceTry);
-		} catch (e) {}
-	}, 1000);
-
-	// Show Quick Save and Preview buttons
-	$(function() {
-		$(".quickSaveButton").css("display", "inline");
-		$(".saveandtest").remove();
-	});
-} else { // No FormData object
-	$(function() {
-		$(".quickSaveButton, .quickSaveNotice").remove();
-	});
-}
-</script>
-
 <?php
 $placeinfooter='
 <div id="solverpopup" style="display: none" class="solverpopup">
@@ -1628,14 +1299,14 @@ $placeinfooter='
 	<div id="solverinsides">
 	<div id="operationselect">
 	Select and drag or copy an expression from your question code.
-	<img id="solverinputhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br/>
+	<img id="solverinputhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br>
 	<div id="solverinputhelp" style="display: none;">
 	</div>
 	<input id="imathastosage" type="text" size="30">
 	<select id="solveroperation" name="solveroperation">
 		<option id="solverchoose" value="">Choose</option>
 		<option id="solversolve" value="solve">Solve</option>
-		<option id="solversolve" value="simplify">Simplify</option>
+		<option id="solversimplify" value="simplify">Simplify</option>
 		<option id="solverdiff" value="diff">Differentiate</option>
 		<option id="solverint" value="integral">Integrate</option>
 		<option id="solverplot" value="plot">Plot</option>
@@ -1645,14 +1316,14 @@ $placeinfooter='
 	<div id="sagemathcode" style="display: none;"></div>
 	<div id="sagecellcontainer">
 		<div id="sagecell"></div>
-		<img id="solverhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br/>
+		<img id="solverhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br>
 	</div>
 	<div id="solverhelpbody" style="display: none">
 	</div>
 	<div id="sagecelloutput"></div>
     <div id="sagetocontroldiv" style="display: none;" >
 		Drag this to the Common Control box or use the buttons below.
-	<img id="solveroutputhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br/>
+	<img id="solveroutputhelpicon" src="'.$staticroot.'/img/help.svg" alt="Help"><br>
 	<div id="sagetocontrolresult">
 		<p><span id="sagetocontrol" draggable="true"></span></p>
 	</div>

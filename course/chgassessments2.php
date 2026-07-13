@@ -55,17 +55,16 @@ if (!(isset($teacherid))) {
         $coreOK = true;
 		if ($_POST['copyopts'] != 'DNC') {
             $copyreqscore = !empty($_POST['copyreqscore']);
-			$tocopy = 'displaymethod,submitby,defregens,defregenpenalty,keepscore,defattempts,defpenalty,showscores,showans,viewingb,scoresingb,ansingb,gbcategory,caltag,shuffle,showwork,noprint,istutorial,showcat,allowlate,timelimit,password,reqscoretype,reqscore,reqscoreaid,showhints,msgtoinstr,posttoforum,extrefs,showtips,cntingb,minscore,deffeedbacktext,tutoredit,exceptionpenalty,earlybonus,defoutcome';
+			$tocopy = 'displaymethod,submitby,defregens,defregenpenalty,keepscore,retakewait,defattempts,defpenalty,showscores,showans,viewingb,scoresingb,ansingb,gbcategory,caltag,shuffle,showwork,noprint,istutorial,showcat,allowlate,timelimit,password,reqscoretype,reqscorejson,showhints,msgtoinstr,posttoforum,extrefs,showtips,cntingb,minscore,deffeedbacktext,tutoredit,exceptionpenalty,exceptionpenaltyinterval,earlybonus,defoutcome';
 			$stm = $DBH->prepare("SELECT $tocopy FROM imas_assessments WHERE id=:id AND courseid=:courseid");
 			$stm->execute(array(':id'=>Sanitize::onlyInt($_POST['copyopts']), ':courseid'=>$cid));
 			$qarr = $stm->fetch(PDO::FETCH_ASSOC);
 			$tocopyarr = explode(',',$tocopy);
 			foreach ($tocopyarr as $k=>$item) {
-                if (($item == 'reqscoreaid' || $item == 'reqscore') && !$copyreqscore) {
+                if ($item == 'reqscorejson' && !$copyreqscore) {
                     unset($qarr[$item]);
                 } else if ($item == 'reqscoretype' && !$copyreqscore) {
                     if (($qarr[$item]&1)==0) {
-                        $sets[] = 'reqscore=ABS(reqscore)';
                         $sets[] = 'reqscoretype=(reqscoretype & ~1)';
                     } else {
                         $sets[] = 'reqscoretype=(reqscoretype | 1)';
@@ -110,6 +109,9 @@ if (!(isset($teacherid))) {
                 if (isset($_POST['showworktype'])) {
                     $qarr[':showwork'] += Sanitize::onlyInt($_POST['showworktype']);
                 }
+				if (isset($_POST['showworkonebox'])) {
+					$qarr[':showwork'] += Sanitize::onlyInt($_POST['showworkonebox']);
+				}
                 $sets[] = "workcutoff=:workcutoff";
                 if (!empty($_POST['doworkcutoff'])) {
                     $qarr[':workcutoff'] = Sanitize::onlyInt($_POST['workcutoffval']);
@@ -123,7 +125,9 @@ if (!(isset($teacherid))) {
                 }
 			}
 
-			if ($_POST['displaymethod'] !== 'DNC') {
+			// displaymethod is set via the "Drill style" submission-type option
+			// below (in the core options bundle) when subtype=='drill'
+			if ($_POST['displaymethod'] !== 'DNC' && $_POST['subtype'] !== 'drill') {
 				$sets[] = "displaymethod=:displaymethod";
 				$qarr[':displaymethod'] = Sanitize::simpleASCII($_POST['displaymethod']);
 			}
@@ -134,12 +138,25 @@ if (!(isset($teacherid))) {
 			}
 
 			// check the core settings for consistency
+			$isDrillChg = ($_POST['subtype'] === 'drill');
 			if ($_POST['subtype'] === 'DNC') {
 				$coreOK = false;
+			} else if ($isDrillChg) {
+				// drill uses by_question storage/grading under the hood
+				$submitby = 'by_question';
 			} else {
 				$submitby = Sanitize::simpleASCII($_POST['subtype']);
 			}
-			if ($_POST['defregens'] === '') {
+			if ($isDrillChg) {
+				// Versions section doesn't apply to drill; use an
+				// effectively-unlimited regen cap instead, matching
+				// addassessment2.php's single-assessment behavior
+				if ($_POST['drilln'] === '') {
+					$coreOK = false;
+				}
+				$defregens = 999;
+				$defregenpenalty = 0;
+			} else if ($_POST['defregens'] === '') {
 				$coreOK = false;
 			} else {
 				$defregens = Sanitize::onlyInt($_POST['defregens']);
@@ -163,14 +180,20 @@ if (!(isset($teacherid))) {
 					$defregenpenalty = 0;
 				}
 			}
-			if ($coreOK && $submitby == 'by_assessment' && $defregens > 1) {
+			if ($coreOK && !$isDrillChg && $submitby == 'by_assessment' && $defregens > 1) {
 				if ($_POST['keepscore'] === 'DNC') {
 					$coreOK = false;
 				} else {
 					$keepscore = Sanitize::simpleASCII($_POST['keepscore']);
 				}
+				if (intval($_POST['retakewait']) > 0) {
+					$retakewait = intval($_POST['retakewait']);
+				} else {
+					$retakewait = 0;
+				}
 			} else {
 				$keepscore = 'best';
+				$retakewait = 0;
 			}
 			if ($_POST['defattempts'] === '') {
 				$coreOK = false;
@@ -224,6 +247,8 @@ if (!(isset($teacherid))) {
 				$qarr[':submitby'] = $submitby;
 				$sets[] = "keepscore=:keepscore";
 				$qarr[':keepscore'] = $keepscore;
+				$sets[] = "retakewait=:retakewait";
+				$qarr[':retakewait'] = $retakewait;
 				$sets[] = "defregens=:defregens";
 				$qarr[':defregens'] = $defregens;
 				$sets[] = "defregenpenalty=:defregenpenalty";
@@ -242,6 +267,12 @@ if (!(isset($teacherid))) {
 				$qarr[':scoresingb'] = $scoresingb;
 				$sets[] = "ansingb=:ansingb";
 				$qarr[':ansingb'] = $ansingb ;
+
+				if ($isDrillChg) {
+					$sets[] = "displaymethod='drill'";
+					$newdrillstyle = Sanitize::simpleString($_POST['drillstyle'] ?? 'time_maxcorrect');
+					$newdrilln = max(1, Sanitize::onlyInt($_POST['drilln'] ?? 10));
+				}
 			}
 
 			if ($_POST['gbcategory'] !== 'DNC') {
@@ -261,6 +292,15 @@ if (!(isset($teacherid))) {
                     $sets[] = "noprint=(noprint & ~1)";
                 }
                 $metadata['noprint'] = $_POST['noprint'];
+			}
+
+			if ($_POST['nodetailedsoln'] !== 'DNC') {
+                if (!empty($_POST['nodetailedsoln'])) {
+                    $sets[] = "noprint=(noprint | 4)";
+                } else {
+                    $sets[] = "noprint=(noprint & ~4)";
+                }
+                $metadata['nodetailedsoln'] = $_POST['nodetailedsoln'];
 			}
 
 			if ($_POST['istutorial'] !== 'DNC') {
@@ -302,19 +342,26 @@ if (!(isset($teacherid))) {
 				$qarr[':password'] = Sanitize::stripHtmlTags($_POST['assmpassword']);
 			}
 
-			if ($_POST['reqscoreaid'] !== 'DNC') {
-				$sets[] = "reqscore=:reqscore";
-				if ($_POST['reqscoreaid'] > 0) {
-					$qarr[':reqscore'] = Sanitize::onlyInt($_POST['reqscore']);
-				} else {
-					$qarr[':reqscore'] = 0;
+			if ($_POST['reqscorechg'] !== 'DNC') {
+				if ($_POST['reqscorechg'] == 0) {
+					$sets[] = "reqscorejson=''";
+				} else if (!empty($_POST['reqscoreaid'])) {
+					$reqscorearr = [];
+					foreach ($_POST['reqscoreaid'] as $k=>$v) {
+						if (!empty($_POST['reqscore'][$k])) {
+							$reqscorearr[] = [$v, $_POST['reqscore'][$k], $_POST['reqscorecalctype'][$k]];
 				}
-				$sets[] = "reqscoreaid=:reqscoreaid";
-				$qarr[':reqscoreaid'] = Sanitize::onlyInt($_POST['reqscoreaid']);
-				if (!empty($_POST['reqscorecalctype'])) {
-					$sets[] = "reqscoretype=(reqscoretype | 2)";
-				} else {
-					$sets[] = "reqscoretype=(reqscoretype & ~2)";
+					}
+					
+					if (count($reqscorearr) > 0) {
+						$sets[] = "reqscorejson=:reqscorejson";
+						if (count($reqscorearr) == 1) {
+							$qarr[':reqscorejson'] = json_encode($reqscorearr[0]);
+						} else {
+							$logic = ($_POST['reqscoreandor'] == 0) ? '&' : '|';
+							$qarr[':reqscorejson'] = json_encode([$logic, $reqscorearr]);
+						}
+					}
 				}
 			}
 			if ($_POST['reqscoreshowtype'] !== 'DNC') {
@@ -392,9 +439,11 @@ if (!(isset($teacherid))) {
 				$qarr[':tutoredit'] = Sanitize::onlyInt($_POST['tutoredit']);
 			}
 
-			if ($_POST['exceptionpenalty'] !== '') {
+			if ($_POST['exceptionpenaltytype'] !== 'DNC' && $_POST['exceptionpenalty'] !== '') {
 				$sets[] = "exceptionpenalty=:exceptionpenalty";
 				$qarr[':exceptionpenalty'] = Sanitize::onlyInt($_POST['exceptionpenalty']);
+				$sets[] = "exceptionpenaltyinterval=:exceptionpenaltyinterval";
+				$qarr[':exceptionpenaltyinterval'] = ($_POST['exceptionpenaltytype'] === 'increasing') ? Sanitize::onlyInt($_POST['exceptionpenaltyinterval']) : 0;
 			}
 			if ($_POST['earlybonus'] !== '') {
 				$sets[] = "earlybonus=:earlybonus";
@@ -471,6 +520,25 @@ if (!(isset($teacherid))) {
 				unset($metadata[':cid']);
 			}
 		}
+        if ($isDrillChg && $coreOK) {
+            // drilljson can't go through the generic bulk $sets update above
+            // since each assessment's existing per-question display names
+            // (dispnames) need to be preserved individually
+            $stm = $DBH->prepare("SELECT id,drilljson FROM imas_assessments WHERE id IN ($checkedlist) AND courseid=:cid");
+            $stm->execute(array(':cid'=>$cid));
+            $upd_drilljson = $DBH->prepare("UPDATE imas_assessments SET drilljson=? WHERE id=?");
+            while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
+                $newdrilljson = array('style'=>$newdrillstyle, 'n'=>$newdrilln);
+                if ($row['drilljson'] != '') {
+                    $olddrilljson = json_decode($row['drilljson'], true);
+                    if (!empty($olddrilljson['dispnames'])) {
+                        $newdrilljson['dispnames'] = $olddrilljson['dispnames'];
+                    }
+                }
+                $upd_drilljson->execute(array(json_encode($newdrilljson), $row['id']));
+            }
+            $updated_settings = true;
+        }
         if ($_POST['lockforassess'] !== 'DNC') {
             // handle separately since must be limited to by_assess
             if (intval($_POST['lockforassess']) == 2) {
@@ -526,7 +594,8 @@ if (!(isset($teacherid))) {
 			);
 		}
         if ($_POST['copyopts'] != 'DNC' || $_POST['defpoints'] !== '' || 
-            isset($_POST['removeperq']) || $_POST['exceptionpenalty'] !== '' ||
+            isset($_POST['removeperq']) || 
+			($_POST['exceptionpenaltytype'] !== 'DNC' && $_POST['exceptionpenalty'] !== '') ||
             $_POST['subtype'] !== 'DNC'
         ) {
             require_once "../includes/updateptsposs.php";
@@ -829,7 +898,7 @@ $(function() {
 	 taken will change the student's data.</p>
 
 	<form id="qform" method=post action="chgassessments2.php?cid=<?php echo $cid; ?>" onsubmit="return valform();" class="tabwrap">
-		<ul class="tablist" role="tablist" aria-label="Mass Change Steps">
+		<ul class="tablist stickyonscroll" role="tablist" aria-label="Mass Change Steps">
 			<li role=presentation class="active">
 				<a href="#" role="tab" id="chgassesstab_sel" aria-controls="chgassess_sel" aria-selected="true"
 					tabindex="0"

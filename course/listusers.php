@@ -85,6 +85,8 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
                 $stm->execute(array(':section'=>$_POST['sec'][$stuid], ':code'=>$_POST['code'][$stuid], ':id'=>$stuid, ':courseid'=>$cid));
                 setSectionGroups($_POST['uid'][$stuid], $cid, $_POST['sec'][$stuid]);
 			}
+			require_once '../includes/validatesections.php';
+			validateSections($cid);
 			header('Location: ' . $GLOBALS['basesiteurl'] . "/course/listusers.php?cid=$cid&r=" . Sanitize::randomQueryStringParam());
 			exit;
 
@@ -298,6 +300,7 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 				$qarr[':rights'] = $myrights;
 				$stm = $DBH->prepare($query);
 				$stm->execute($qarr);
+
 			} else {
 				$msgout = '<p>Username, name, email, and password left unchanged.</p>';
 			}
@@ -324,20 +327,26 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 			if ($timelimitmult <= 0) {
 				$timelimitmult = '1.0';
 			}
+			$latepassmult = floatval($_POST['latepassmult']);
+			if ($latepassmult <= 0) {
+				$latepassmult = '1.0';
+			}
 			$latepasses = intval($_POST['latepasses']);
 			//echo $timelimitmult;
 
 			if ($locked==0) {
-				$stm = $DBH->prepare("UPDATE imas_students SET code=:code,section=:section,locked=:locked,timelimitmult=:timelimitmult,hidefromcourselist=:hidefromcourselist,latepass=:latepass WHERE userid=:userid AND courseid=:courseid");
-				$stm->execute(array(':code'=>$code, ':section'=>$section, ':locked'=>$locked, ':timelimitmult'=>$timelimitmult, ':hidefromcourselist'=>$hide, ':latepass'=>$latepasses, ':userid'=>$uidToUpdate, ':courseid'=>$cid));
+				$stm = $DBH->prepare("UPDATE imas_students SET code=:code,section=:section,locked=:locked,timelimitmult=:timelimitmult,latepassmult=:latepassmult,hidefromcourselist=:hidefromcourselist,latepass=:latepass WHERE userid=:userid AND courseid=:courseid");
+				$stm->execute(array(':code'=>$code, ':section'=>$section, ':locked'=>$locked, ':timelimitmult'=>$timelimitmult, ':latepassmult'=>$latepassmult, ':hidefromcourselist'=>$hide, ':latepass'=>$latepasses, ':userid'=>$uidToUpdate, ':courseid'=>$cid));
 			} else {
-				$stm = $DBH->prepare("UPDATE imas_students SET code=:code,section=:section,timelimitmult=:timelimitmult,hidefromcourselist=:hidefromcourselist,latepass=:latepass WHERE userid=:userid AND courseid=:courseid");
-				$stm->execute(array(':code'=>$code, ':section'=>$section, ':timelimitmult'=>$timelimitmult, ':hidefromcourselist'=>$hide, ':latepass'=>$latepasses, ':userid'=>$uidToUpdate, ':courseid'=>$cid));
+				$stm = $DBH->prepare("UPDATE imas_students SET code=:code,section=:section,timelimitmult=:timelimitmult,latepassmult=:latepassmult,hidefromcourselist=:hidefromcourselist,latepass=:latepass WHERE userid=:userid AND courseid=:courseid");
+				$stm->execute(array(':code'=>$code, ':section'=>$section, ':timelimitmult'=>$timelimitmult, ':latepassmult'=>$latepassmult, ':hidefromcourselist'=>$hide, ':latepass'=>$latepasses, ':userid'=>$uidToUpdate, ':courseid'=>$cid));
 				$stm = $DBH->prepare("UPDATE imas_students SET locked=:locked WHERE userid=:userid AND courseid=:courseid AND locked=0");
 				$stm->execute(array(':locked'=>$locked, ':userid'=>$uidToUpdate, ':courseid'=>$cid));
             }
             require_once '../includes/setSectionGroups.php';
             setSectionGroups($uidToUpdate, $cid, $section);
+			require_once '../includes/validatesections.php';
+			validateSections($cid);
 
 			require_once '../includes/userpics.php';
 
@@ -370,7 +379,7 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 			//header('Location: ' . $urlmode  . $_SERVER['HTTP_HOST'] . rtrim(dirname($_SERVER['PHP_SELF']), '/\\') . "/listusers.php?cid=$cid");
 			exit;
 		} else {
-			$query = "SELECT imas_users.*,imas_students.code,imas_students.section,imas_students.locked,imas_students.timelimitmult,imas_students.hidefromcourselist,imas_students.latepass FROM imas_users,imas_students ";
+			$query = "SELECT imas_users.*,imas_students.code,imas_students.section,imas_students.locked,imas_students.timelimitmult,imas_students.latepassmult,imas_students.hidefromcourselist,imas_students.latepass FROM imas_users,imas_students ";
 			$query .= "WHERE imas_users.id=imas_students.userid AND imas_users.id=:id AND imas_students.courseid=:courseid";
 			$stm = $DBH->prepare($query);
 			$stm->execute(array(':id'=>$uidToUpdate, ':courseid'=>$cid));
@@ -465,7 +474,7 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 			$hassection = true;
 			$sectionselect = "<br/><select id=\"secfiltersel\" onchange=\"chgsecfilter()\"><option value=\"-1\" " ;
 			if ($secfilter==-1) {$sectionselect .= 'selected=1';}
-			$sectionselect .=  '>All</option>';
+			$sectionselect .=  '>'._('All').'</option>';
 			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
 				$sectionselect .=  "<option value=\"" . Sanitize::encodeStringForDisplay($row[0]) . "\" ";
 				if ($row[0]==$secfilter) {
@@ -496,7 +505,7 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 		$haslatepasses = false;
 
 		$query = "SELECT imas_students.id,imas_students.userid,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.SID,imas_students.lastaccess,";
-		$query .= "imas_students.section,imas_students.code,imas_students.locked,imas_users.hasuserimg,imas_students.timelimitmult,imas_students.latepass ";
+		$query .= "imas_students.section,imas_students.code,imas_students.locked,imas_users.hasuserimg,imas_students.timelimitmult,imas_students.latepassmult,imas_students.latepass ";
 		$query .= "FROM imas_students,imas_users WHERE imas_students.courseid=:courseid AND imas_students.userid=imas_users.id ";
 		if ($secfilter!=-1) {
 			$query .= "AND imas_students.section=:section ";
@@ -519,9 +528,9 @@ if (!isset($teacherid)) { // loaded by a NON-teacher
 				$haslatepasses=true;
 			}
 		}
-		$hasSectionRowHeader = ($hassection)? "<th><label for=\"secfiltersel\">Section</label>$sectionselect</th>" : "";
-		$hasCodeRowHeader = ($hascode) ? "<th>Code</th>" : "";
-		$hasLatePassHeader = ($haslatepasses) ? "<th>LatePasses</th>" : "";
+		$hasSectionRowHeader = ($hassection)? "<th><label for=\"secfiltersel\">"._('Section')."</label>$sectionselect</th>" : "";
+		$hasCodeRowHeader = ($hascode) ? "<th>"._('Code')."</th>" : "";
+		$hasLatePassHeader = ($haslatepasses) ? "<th>"._('LatePasses')."</th>" : "";
 
 	}
 } //END DATA MANIPULATION
@@ -615,10 +624,10 @@ if ($overwriteBody==1) {
 ?>
 	<form method=post action="listusers.php?cid=<?php echo $cid ?>&assigncode=1">
 		<table class=gb>
-        <caption class="sr-only">Students</caption>
+        <caption class="sr-only"><?php echo _('Students'); ?></caption>
 			<thead>
 			<tr>
-				<th>Name</th><th>Section</th><th>Code</th>
+				<th><?php echo _('Name'); ?></th><th><?php echo _('Section'); ?></th><th><?php echo _('Code'); ?></th>
 			</tr>
 			</thead>
 			<tbody>
@@ -639,19 +648,19 @@ if ($overwriteBody==1) {
 ?>
 			</tbody>
 		</table>
-		<button type=submit name=submit value=submit>Submit</button>
+		<button type=submit name=submit value=submit><?php echo _('Submit'); ?></button>
 	</form>
 <?php
 	} elseif (isset($_GET['enroll']) && ($myrights==100 || (isset($CFG['GEN']['allowinstraddbyusername']) && $CFG['GEN']['allowinstraddbyusername']==true))) {
 ?>
 	<form method=post action="listusers.php?enroll=student&cid=<?php echo $cid ?>">
-		<span class=form>Username to enroll:</span>
+		<span class=form><?php echo _('Username to enroll:'); ?></span>
 		<span class=formright><input type="text" class="pii-username" name="username"></span><br class=form>
-		<span class=form>Section (optional):</span>
+		<span class=form><?php echo _('Section (optional):'); ?></span>
 		<span class=formright><input type="text" name="section"></span><br class=form>
-		<span class=form>Code (optional):</span>
+		<span class=form><?php echo _('Code (optional):'); ?></span>
 		<span class=formright><input type="text" name="code"></span><br class=form>
-		<div class=submit><input type="submit" value="Enroll"></div>
+		<div class=submit><input type="submit" value="<?php echo _('Enroll'); ?>"></div>
 	</form>
 <?php
 	} elseif (isset($_GET['newstu']) && $CFG['GEN']['allowinstraddstus']) {
@@ -660,15 +669,15 @@ if ($overwriteBody==1) {
 	<form method=post id=pageform class=limitaftervalidate action="listusers.php?cid=<?php echo $cid ?>&newstu=new">
     <div id="errorlive" aria-live="polite" class="sr-only"></div>
 	<span class=form><label for="SID"><?php echo $loginprompt;?>:</label></span> <input class="form pii-username" type=text size=12 id=SID name=SID><BR class=form>
-	<span class=form><label for="pw1">Choose a password:</label></span><input class="form pii-security" type=text size=20 id=pw1 name=pw1><BR class=form>
-	<span class=form><label for="firstname">Enter First Name:</label></span> <input class="form pii-first-name" type=text size=20 id=firstname name=firstname><BR class=form>
-	<span class=form><label for="lastname">Enter Last Name:</label></span> <input class="form pii-last-name" type=text size=20 id=lastname name=lastname><BR class=form>
-	<span class=form><label for="email">Enter E-mail address:</label></span>  <input class="form pii-email" type=text size=60 id=email name=email><BR class=form>
-	<span class=form>Section (optional):</span>
+	<span class=form><label for="pw1"><?php echo _('Choose a password:'); ?></label></span><input class="form pii-security" type=text size=20 id=pw1 name=pw1><BR class=form>
+	<span class=form><label for="firstname"><?php echo _('Enter First Name:'); ?></label></span> <input class="form pii-first-name" type=text size=20 id=firstname name=firstname><BR class=form>
+	<span class=form><label for="lastname"><?php echo _('Enter Last Name:'); ?></label></span> <input class="form pii-last-name" type=text size=20 id=lastname name=lastname><BR class=form>
+	<span class=form><label for="email"><?php echo _('Enter E-mail address:'); ?></label></span>  <input class="form pii-email" type=text size=60 id=email name=email><BR class=form>
+	<span class=form><?php echo _('Section (optional):'); ?></span>
 		<span class=formright><input type="text" name="section"></span><br class=form>
-	<span class=form>Code (optional):</span>
+	<span class=form><?php echo _('Code (optional):'); ?></span>
 		<span class=formright><input type="text" name="code"></span><br class=form>
-	<div class=submit><input type=submit value="Create and Enroll"></div>
+	<div class=submit><input type=submit value="<?php echo _('Create and Enroll'); ?>"></div>
 	</form>
 
 <?php
@@ -691,49 +700,51 @@ if ($overwriteBody==1) {
 ?>
 		<form enctype="multipart/form-data" id=pageform method=post action="listusers.php?cid=<?php echo $cid ?>&chgstuinfo=true&uid=<?php echo Sanitize::onlyInt($_GET['uid']) ?>" class="limitaftervalidate"/>
             <div id="errorlive" aria-live="polite" class="sr-only"></div>
-            <span class=form><label for="SID">User Name (login name):</label></span>
+            <span class=form><label for="SID"><?php echo _('User Name (login name):'); ?></label></span>
 			<input <?php echo $disabled;?> class="form pii-username" type=text size=20 id=SID name=SID value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['SID']); ?>"/><br class=form>
-			<span class=form><label for="firstname">First Name:</label></span>
+			<span class=form><label for="firstname"><?php echo _('First Name:'); ?></label></span>
 			<input <?php echo $disabled;?> class="form pii-first-name" type=text size=20 id=firstname name=firstname value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['FirstName']); ?>"/><br class=form>
-			<span class=form><label for="lastname">Last Name:</label></span>
+			<span class=form><label for="lastname"><?php echo _('Last Name:'); ?></label></span>
 			<input <?php echo $disabled;?> class="form pii-last-name" type=text size=20 id=lastname name=lastname value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['LastName']); ?>"/><BR class=form>
-			<span class=form><label for="email">E-mail address:</label></span>
+			<span class=form><label for="email"><?php echo _('E-mail address:'); ?></label></span>
 			<input <?php echo $disabled;?> class="form pii-email" type=text size=60 id=email name=email value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['email']); ?>"/><BR class=form>
-			<span class=form><label for="stupic">Picture:</label></span>
+			<span class=form><label for="stupic"><?php echo _('Picture:'); ?></label></span>
 			<span class="formright">
 			<?php
 		if ($lineStudent['hasuserimg']==1) {
 			if(isset($GLOBALS['CFG']['GEN']['AWSforcoursefiles']) && $GLOBALS['CFG']['GEN']['AWSforcoursefiles'] == true) {
-				echo "<img class=\"pii-image\" src=\"{$urlmode}{$GLOBALS['AWSbucket']}.s3.amazonaws.com/cfiles/userimg_" . Sanitize::onlyInt($_GET['uid']) . ".jpg\" alt=\"User picture\"/> <input type=\"checkbox\" name=\"removepic\" value=\"1\" /> Remove ";
+				echo "<img class=\"pii-image\" src=\"{$urlmode}{$GLOBALS['AWSbucket']}.s3.amazonaws.com/cfiles/userimg_" . Sanitize::onlyInt($_GET['uid']) . ".jpg\" alt=\"" . _('User picture') . "\"/> <input type=\"checkbox\" name=\"removepic\" value=\"1\" /> " . _('Remove') . " ";
 			} else {
 				$curdir = rtrim(dirname(__FILE__), '/\\');
 				$galleryPath = "$curdir/course/files/";
-				echo "<img class=\"pii-image\" src=\"$imasroot/course/files/userimg_" . Sanitize::onlyInt($_GET['uid']) . ".jpg\" alt=\"User picture\"/> <input type=\"checkbox\" name=\"removepic\" value=\"1\" /> Remove ";
+				echo "<img class=\"pii-image\" src=\"$imasroot/course/files/userimg_" . Sanitize::onlyInt($_GET['uid']) . ".jpg\" alt=\"" . _('User picture') . "\"/> <input type=\"checkbox\" name=\"removepic\" value=\"1\" /> " . _('Remove') . " ";
 			}
 		} else {
-			echo "No Pic ";
+			echo _('No Pic') . " ";
 		}
 		?>
 			<br/><input type="file" name="stupic"/></span><br class="form" />
-			<span class=form>Section (optional):</span>
+			<span class=form><?php echo _('Section (optional):'); ?></span>
 			<span class=formright><input type="text" name="section" value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['section']); ?>"/></span><br class=form>
-			<span class=form>Code (optional):</span>
+			<span class=form><?php echo _('Code (optional):'); ?></span>
 			<span class=formright><input type="text" name="code" value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['code']); ?>"/></span><br class=form>
-			<span class=form>Time Limit Multiplier:</span>
+			<span class=form><?php echo _('Time Limit Multiplier:'); ?></span>
 			<span class=formright><input type="number" min="0.01" step="0.01" name="timelimitmult" value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['timelimitmult']); ?>"/></span><br class=form>
-			<span class=form>LatePasses:</span>
+			<span class=form><?php echo _('LatePass Time Multiplier:'); ?></span>
+			<span class=formright><input type="number" min="0.01" step="0.01" name="latepassmult" value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['latepassmult']); ?>"/></span><br class=form>
+			<span class=form><?php echo _('LatePasses:'); ?></span>
 			<span class=formright><input type="number" min="0" name="latepasses" value="<?php echo Sanitize::encodeStringForDisplay($lineStudent['latepass']); ?>"/></span><br class=form>
-			<span class=form>Lock out of course?</span>
+			<span class=form><?php echo _('Lock out of course?'); ?></span>
 			<span class=formright><input type="checkbox" name="locked" value="1" <?php if ($lineStudent['locked']>0) {echo ' checked="checked" ';} ?>/></span><br class=form>
-			<span class="form">Student has course hidden from course list?</span>
+			<span class="form"><?php echo _('Student has course hidden from course list?'); ?></span>
 			<span class="formright"><input type="checkbox" name="hidefromcourselist" value="1" <?php if ($lineStudent['hidefromcourselist']>0) {echo ' checked="checked" ';} ?>/></span><br class=form>
-			<span class=form><label for="doresetpw">Reset password?</label></span>
+			<span class=form><label for="doresetpw"><?php echo _('Reset password?'); ?></label></span>
 			<span class=formright>
 				<input <?php echo $disabled;?> type=checkbox name="doresetpw" id="doresetpw" value="1" onclick="$('#newpwwrap').toggle(this.checked)" />
-				<span id="newpwwrap" style="display:none"><label for="pw1">Set temporary password to:</label>
+				<span id="newpwwrap" style="display:none"><label for="pw1"><?php echo _('Set temporary password to:'); ?></label>
 				<input type=text size=20 name="pw1" id="pw1" /></span>
 			</span><br class=form />
-			<div class=submit><input type=submit value="Update Info"></div>
+			<div class=submit><input type=submit value="<?php echo _('Update Info'); ?>"></div>
 		</form>
 
 <?php
@@ -746,14 +757,14 @@ if ($overwriteBody==1) {
 	} else if (isset($_POST['posted']) && $_POST['posted']=='maketutor' && count($_POST['checked'])> 0) {
 		echo '<form enctype="multipart/form-data" id=pageform method=post action="managetutors.php?cid='.$cid.'">';
 
-		echo '<p class=noticetext style="font-size:150%">Warning</p>';
-		echo '<p>To promote these students to a tutor, they will have to be un-enrolled as a student, ';
-		echo '<span class="noticetext">which will DELETE ALL their student data</span>, including assessment scores. ';
-		echo 'If you are SURE you want to do this, check the boxes next to each student.</p>';
-		echo '<p>Un-enroll as a student and add as a tutor:</p>';
+		echo '<p class=noticetext style="font-size:150%">'._('Warning').'</p>';
+		echo '<p>'._('To promote these students to a tutor, they will have to be un-enrolled as a student, ');
+		echo '<span class="noticetext">'._('which will DELETE ALL their student data').'</span>'._(', including assessment scores. ');
+		echo _('If you are SURE you want to do this, check the boxes next to each student.').'</p>';
+		echo '<p>'._('Un-enroll as a student and add as a tutor:').'</p>';
 
 		echo '<table class="gb">
-    		<caption class="sr-only">Potential Tutors</caption>
+    		<caption class="sr-only">'._('Potential Tutors').'</caption>
 			<thead>
 				<tr>
 					<th>'._('Add as tutor?').'</th>
@@ -771,7 +782,7 @@ if ($overwriteBody==1) {
 			echo '</label></td>';
 			echo '<td>';
 			echo '<select name="section['.Sanitize::encodeStringForDisplay($u['id']).']" aria-labelledby="n'.intval($k).'">';
-			echo '<option value="">All</option>';
+			echo '<option value="">'._('All').'</option>';
 			foreach ($sections as $sec) {
 				echo '<option value="'.Sanitize::encodeStringForDisplay($sec).'">'.Sanitize::encodeStringForDisplay($sec).'</option>';
 			}
@@ -779,7 +790,7 @@ if ($overwriteBody==1) {
 		}
 		echo '</tbody></table>';
 
-		echo '<p><button type=submit name=submit value=submit>Submit</button></p>';
+		echo '<p><button type=submit name=submit value=submit>'._('Submit').'</button></p>';
 		echo '</form>';
 	} else {
 ?>
@@ -892,12 +903,12 @@ if ($overwriteBody==1) {
     <caption class="sr-only">Roster</caption>
 		<thead>
 		<tr>
-			<th><span class="sr-only">Checkboxes</span></th>
-			<th><span class="sr-only">Images</span></th>
+			<th><span class="sr-only"><?php echo _('Checkboxes'); ?></span></th>
+			<th><span class="sr-only"><?php echo _('Images'); ?></span></th>
 			<?php echo $hasSectionRowHeader; ?>
 			<?php echo $hasCodeRowHeader; ?>
-			<th>Name</th>
-			<th><span class="sr-only">Notes</span></th>
+			<th><?php echo _('Name'); ?></th>
+			<th><span class="sr-only"><?php echo _('Notes'); ?></span></th>
 			<?php
 			if ($showSID) {
 				echo '<th>'.Sanitize::encodeStringForDisplay($loginprompt).'</th>';
@@ -906,8 +917,8 @@ if ($overwriteBody==1) {
 				echo '<th>'._('Email').'</th>';
 			}
 			?>
-			<th>Last Access <span id="llt" class="sr-only">View login log</span></th>
-			<th id="gt">Grades</th>
+			<th><?php echo _('Last Access'); ?> <span id="llt" class="sr-only"><?php echo _('View login log'); ?></span></th>
+			<th id="gt"><?php echo _('Grades'); ?></th>
 			<?php echo $hasLatePassHeader; ?>
 		</tr>
 		</thead>
@@ -925,18 +936,18 @@ if ($overwriteBody==1) {
 			$icons = '';
 			$numstu++;
 			if ($line['locked']>0) {
-				$icons .= '<img src="'.$staticroot.'/img/lock.png" alt="Locked" title="Locked"/>';
+				$icons .= '<img src="'.$staticroot.'/img/lock.png" alt="'._('Locked').'" title="'._('Locked').'"/>';
 			} else {
 				$numunlocked++;
 			}
-			if ($line['timelimitmult']!=1) {
-				$icons .= '<img src="'.$staticroot.'/img/time.png" alt="'._('Has a time limit multiplier set').'" title="'._('Has a time limit multiplier set').'"/> ';
+			if ($line['timelimitmult']!=1 || $line['latepassmult']!=1) {
+				$icons .= '<img src="'.$staticroot.'/img/time.png" alt="'._('Has a time limit or latepass multiplier set').'" title="'._('Has a time limit or latepass multiplier set').'"/> ';
 			}
 			if ($icons != '') {
 				$icons = '<a href="listusers.php?cid='.$cid.'&chgstuinfo=true&uid='.Sanitize::onlyInt($line['userid']).'">'.$icons.'</a>';
 			}
 
-			$lastaccess = ($line['lastaccess']>0) ? tzdate("n/j/y g:ia",$line['lastaccess']) : "never";
+			$lastaccess = ($line['lastaccess']>0) ? tzdate("n/j/y g:ia",$line['lastaccess']) : _('never');
 
 			$hasSectionData = ($hassection) ? "<td>".Sanitize::encodeStringForDisplay($line['section'])."</td>" : "";
 			$hasCodeData = ($hascode) ? "<td>".Sanitize::encodeStringForDisplay($line['code'])."</td>" : "";
@@ -949,9 +960,9 @@ if ($overwriteBody==1) {
 
 	if ($line['hasuserimg']==1) {
 		if(isset($GLOBALS['CFG']['GEN']['AWSforcoursefiles']) && $GLOBALS['CFG']['GEN']['AWSforcoursefiles'] == true) {
-			echo "<img class=\"pii-image\" src=\"{$urlmode}{$GLOBALS['AWSbucket']}.s3.amazonaws.com/cfiles/userimg_sm" . Sanitize::onlyInt($line['userid']) . ".jpg\" style=\"display:none;\" alt=\"User picture\" />";
+			echo "<img class=\"pii-image\" src=\"{$urlmode}{$GLOBALS['AWSbucket']}.s3.amazonaws.com/cfiles/userimg_sm" . Sanitize::onlyInt($line['userid']) . ".jpg\" style=\"display:none;\" alt=\"" . _('User picture') . "\" />";
 		} else {
-			echo "<img class=\"pii-image\" src=\"$imasroot/course/files/userimg_sm" . Sanitize::onlyInt($line['userid']) . ".jpg\" style=\"display:none;\" alt=\"User picture\" />";
+			echo "<img class=\"pii-image\" src=\"$imasroot/course/files/userimg_sm" . Sanitize::onlyInt($line['userid']) . ".jpg\" style=\"display:none;\" alt=\"" . _('User picture') . "\" />";
 		}
 	}
 ?>
@@ -982,7 +993,7 @@ if ($overwriteBody==1) {
 
 				?>
 
-				<td><a href="gradebook.php?cid=<?php echo $cid ?>&stu=<?php echo Sanitize::onlyInt($line['userid']); ?>&from=listusers" class="gl" aria-labelledby="gt u<?php echo $ln;?>">Grades</a></td>
+				<td><a href="gradebook.php?cid=<?php echo $cid ?>&stu=<?php echo Sanitize::onlyInt($line['userid']); ?>&from=listusers" class="gl" aria-labelledby="gt u<?php echo $ln;?>"><?php echo _('Grades'); ?></a></td>
 				<?php
 				if ($haslatepasses) {
 					echo '<td>'.Sanitize::onlyInt($line['latepass']).'</td>';
@@ -996,9 +1007,9 @@ if ($overwriteBody==1) {
 			</tbody>
 		</table>
 <?php
-		echo "<p>Number of students: <b>$numunlocked</b>";
+		echo "<p>"._('Number of students:')." <b>$numunlocked</b>";
 		if ($numstu != $numunlocked) {
-			echo " ($numstu including locked students)";
+			echo " (" . sprintf(_('%d including locked students'), $numstu) . ")";
 		}
 		echo '</p>';
 ?>

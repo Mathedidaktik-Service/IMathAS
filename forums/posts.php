@@ -48,11 +48,13 @@ $query = "SELECT ifs.settings,ifs.replyby,ifs.defdisplay,ifs.name,ifs.points,ifs
 $query .= "FROM imas_forums AS ifs JOIN imas_forum_threads AS ift ON ifs.id=ift.forumid LEFT JOIN imas_stugroupset AS igs ON igs.id=ifs.groupsetid WHERE ifs.id=:id AND ift.id=:threadid AND ifs.courseid=:cid";
 $stm = $DBH->prepare($query);
 $stm->execute(array(':id'=>$forumid, ':threadid'=>$threadid, ':cid'=>$cid));
-list($forumsettings, $replyby, $defdisplay, $forumname, $pointsposs, $groupsetid, $groupsetname, $postby, $rubric, $tutoredit, $enddate, $avail, $allowlate, $autoscore, $forumcourseid, $threadforum) = $stm->fetch(PDO::FETCH_NUM);
-if ($forumsettings === null) {
+$row = $stm->fetch(PDO::FETCH_NUM);
+if ($row === false) {
 	echo "Invalid forum ID or thread ID";
 	exit;
 }
+list($forumsettings, $replyby, $defdisplay, $forumname, $pointsposs, $groupsetid, $groupsetname, $postby, $rubric, $tutoredit, $enddate, $avail, $allowlate, $autoscore, $forumcourseid, $threadforum) = $row;
+
 if ($forumcourseid != $cid) {
 	echo "Invalid forum ID";
 	exit;
@@ -211,25 +213,28 @@ if ($postbeforeview && !$canviewall) {
 
 if ($oktoshow) {
 	if ($haspoints) {
-		$query = "SELECT imas_forum_posts.*,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.hasuserimg,imas_grades.score,imas_grades.feedback,imas_students.section,imas_students.id AS stuid FROM ";
-		$query .= "imas_forum_posts JOIN imas_users ON imas_forum_posts.userid=imas_users.id ";
-		$query .= "LEFT JOIN imas_students ON imas_students.userid=imas_forum_posts.userid AND imas_students.courseid=:courseid ";
-		$query .= "LEFT JOIN imas_grades ON imas_grades.gradetype='forum' AND imas_grades.refid=imas_forum_posts.id ";
-		$query .= "WHERE (imas_forum_posts.id=:id OR imas_forum_posts.threadid=:threadid) ORDER BY imas_forum_posts.id";
+		$query = "SELECT imas_forum_posts.*,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.hasuserimg,imas_grades.score,imas_grades.feedback,imas_students.section,imas_students.id AS stuid,imas_teachers.id AS teacherid,imas_tutors.id AS tutorid "
+			. "FROM imas_forum_posts JOIN imas_users ON imas_forum_posts.userid=imas_users.id "
+			. "LEFT JOIN imas_students ON imas_students.userid=imas_forum_posts.userid AND imas_students.courseid=:courseid "
+			. "LEFT JOIN imas_teachers ON imas_teachers.userid=imas_forum_posts.userid AND imas_teachers.courseid=:courseid "
+			. "LEFT JOIN imas_tutors ON imas_tutors.userid=imas_forum_posts.userid AND imas_tutors.courseid=:courseid "
+			. "LEFT JOIN imas_grades ON imas_grades.gradetype='forum' AND imas_grades.refid=imas_forum_posts.id "
+			. "WHERE (imas_forum_posts.id=:id OR imas_forum_posts.threadid=:threadid) ORDER BY imas_forum_posts.id";	
 	} else {
-		$query = "SELECT imas_forum_posts.*,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.hasuserimg,imas_students.section,imas_students.id AS stuid FROM ";
-		$query .= "imas_forum_posts JOIN imas_users ON imas_forum_posts.userid=imas_users.id ";
-		$query .= "LEFT JOIN imas_students ON imas_students.userid=imas_forum_posts.userid AND imas_students.courseid=:courseid ";
-		$query .= "WHERE (imas_forum_posts.id=:id OR imas_forum_posts.threadid=:threadid) ORDER BY imas_forum_posts.id";
-		//$query = "SELECT imas_forum_posts.*,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.hasuserimg from imas_forum_posts,imas_users ";
-		//$query .= "WHERE imas_forum_posts.userid=imas_users.id AND (imas_forum_posts.id='$threadid' OR imas_forum_posts.threadid='$threadid') ORDER BY imas_forum_posts.id";
+		$query = "SELECT imas_forum_posts.*,imas_users.FirstName,imas_users.LastName,imas_users.email,imas_users.hasuserimg,imas_students.section,imas_students.id AS stuid,imas_teachers.id AS teacherid,imas_tutors.id AS tutorid "
+			. "FROM imas_forum_posts JOIN imas_users ON imas_forum_posts.userid=imas_users.id "
+			. "LEFT JOIN imas_students ON imas_students.userid=imas_forum_posts.userid AND imas_students.courseid=:courseid "
+			. "LEFT JOIN imas_teachers ON imas_teachers.userid=imas_forum_posts.userid AND imas_teachers.courseid=:courseid "
+			. "LEFT JOIN imas_tutors ON imas_tutors.userid=imas_forum_posts.userid AND imas_tutors.courseid=:courseid "
+			. "WHERE (imas_forum_posts.id=:id OR imas_forum_posts.threadid=:threadid) "
+			. "ORDER BY imas_forum_posts.id";
 	}
 	$stm = $DBH->prepare($query);
 	$stm->execute(array(':courseid'=>$cid, ':id'=>$threadid, ':threadid'=>$threadid));
 	// $result = mysql_query($query) or die("Query failed : $query " . mysql_error());
 	$children = array(); $date = array(); $subject = array(); $re = array(); $message = array(); $posttype = array(); $likes = array(); $mylikes = array();
 	$ownerid = array(); $files = array(); $points= array(); $feedback= array(); $poster= array(); $email= array(); $hasuserimg = array(); $section = array();
-	$isstu = array(); $stus = []; $posttoforumaid = null;
+	$isstu = array(); $stus = []; $posttoforumaid = null; $userrole = [];
 	while ($line =  $stm->fetch(PDO::FETCH_ASSOC)) {
 		if ($line['parent']==0) {
 			if ($line['replyby']!=null) {
@@ -244,6 +249,7 @@ if ($oktoshow) {
         if ($line['stuid'] !== null) {
             $stus[] = $line['userid'];
         }
+
 		$children[$line['parent']][] = $line['id'];
 		$date[$line['id']] = $line['postdate'];
 		$n = 0;
@@ -285,6 +291,11 @@ if ($oktoshow) {
 			$poster[$line['id']] = $line['FirstName'] . ' ' . $line['LastName'];
 			$section[$line['id']] = $line['section'];
 			$email[$line['id']] = $line['email'];
+			if ($line['teacherid'] !== null) {
+				$userrole[$line['id']] = 'instructor';
+			} else if ($line['tutorid'] !== null) {
+				$userrole[$line['id']] = 'tutor';
+			}
 		}
 		$likes[$line['id']] = array(0,0,0);
 
@@ -331,6 +342,52 @@ if ($oktoshow) {
 		($CFG['MySQL_ver']>=8 && ($page==-2 || $page==-1))
 	) { //came from new threads or flagged threads
 		if ($CFG['MySQL_ver']>=8) {
+			/* possible alternate:
+
+			$qarr = [':userid'=>$userid, ':curthread'=>$threadid];
+			$query = 'WITH eligible_threads AS (
+				SELECT
+					t.id AS threadid,
+					t.forumid,
+					t.lastposttime,
+					ROW_NUMBER() OVER (ORDER BY t.lastposttime DESC, t.id ASC) AS rn
+				FROM imas_forum_threads t
+				JOIN imas_forums f ON t.forumid = f.id
+				LEFT JOIN imas_forum_views mv
+					ON mv.threadid = t.id AND mv.userid = :userid ';
+			if (!isset($teacherid)) {
+				$query .= ' LEFT JOIN imas_stugroupmembers sm
+    				ON sm.userid = :userid AND sm.stugroupid = t.stugroupid';
+			}
+			if ($page==-1 || $page==-2) {
+				$query .= ' WHERE f.id = :forumid';
+				$qarr[':forumid'] = $forumid;
+			} else {
+				$query .= ' WHERE f.courseid = :courseid';
+				$qarr[':courseid'] = $cid;
+			}
+			$query .= ' AND t.lastposttime < ' . $now;
+				
+			if (!isset($teacherid)) {
+				$query .= ' AND (f.avail = 2 OR (f.avail = 1 AND f.startdate < '.$now.' AND f.enddate > '.$now.'))
+					AND (t.stugroupid = 0 OR sm.stugroupid IS NOT NULL)';
+			}
+			if ($page == -3 || $page == -1) {
+				$query .= ' AND (mv.lastview IS NULL OR t.lastposttime > mv.lastview)';
+			} else if ($page == -5 || $page==-2) {
+				$query .= ' AND mv.tagged=1';
+			}
+			$query .= ') SELECT
+				e.threadid,
+				prev.threadid AS prev_threadid,
+				prev.forumid AS prev_forumid,
+				nxt.threadid AS next_threadid,
+				nxt.forumid AS next_forumid
+				FROM eligible_threads e
+				LEFT JOIN eligible_threads prev ON prev.rn = e.rn - 1
+				LEFT JOIN eligible_threads nxt  ON nxt.rn = e.rn + 1
+				WHERE e.threadid = :curthread';
+			*/
 			$query = 'SELECT threadid, prev_threadid, prev_forumid, next_threadid, next_forumid
 				FROM (
 				SELECT 
@@ -344,10 +401,14 @@ if ($oktoshow) {
 			if (!isset($teacherid)) {
 				$query .= ' AND (imas_forums.avail=2 OR (imas_forums.avail=1 AND imas_forums.startdate<'.$now.' AND imas_forums.enddate>'.$now.'))';
 			}
-			$query .= ' LEFT JOIN imas_forum_views AS mfv ON mfv.threadid=imas_forum_threads.id AND mfv.userid=:userid
-				WHERE imas_forums.courseid=:courseid ';
+			$query .= ' LEFT JOIN imas_forum_views AS mfv ON mfv.threadid=imas_forum_threads.id AND mfv.userid=:userid';
 			if (!isset($teacherid)) {
-				$query .= ' AND (imas_forum_threads.stugroupid=0 OR imas_forum_threads.stugroupid IN (SELECT stugroupid FROM imas_stugroupmembers WHERE userid=:userid)) ';
+				$query .= ' LEFT JOIN imas_stugroupmembers ON imas_stugroupmembers.userid = :userid 
+					AND imas_stugroupmembers.stugroupid = imas_forum_threads.stugroupid ';
+			}
+			$query .= '	WHERE imas_forums.courseid=:courseid ';
+			if (!isset($teacherid)) {
+				$query .= ' AND (imas_forum_threads.stugroupid=0 OR imas_stugroupmembers.stugroupid IS NOT NULL) ';
 			}
 			if ($page==-3 || $page==-1) {	
 				$query .= ' AND (imas_forum_threads.lastposttime>mfv.lastview OR (mfv.lastview IS NULL))';
@@ -361,6 +422,7 @@ if ($oktoshow) {
 			}
 			$query .= ') AS threads_with_neighbors
 				WHERE threadid = :curthread';
+
 			$stm = $DBH->prepare($query);
 			$stm->execute($qarr);
 			$row = $stm->fetch(PDO::FETCH_ASSOC);
@@ -488,7 +550,7 @@ if ($oktoshow) {
 	} else {
 		$lastview = 0;
 		$tagged = 0;
-		$stm = $DBH->prepare("INSERT INTO imas_forum_views (userid,threadid,lastview) VALUES (:userid, :threadid, :lastview)");
+		$stm = $DBH->prepare("INSERT INTO imas_forum_views (userid,threadid,lastview) VALUES (:userid, :threadid, :lastview) ON DUPLICATE KEY UPDATE lastview=VALUES(lastview)");
 		$stm->execute(array(':userid'=>$userid, ':threadid'=>$threadid, ':lastview'=>$now));
 	}
 }
@@ -515,7 +577,7 @@ if (!$oktoshow) {
 	echo '<div id="headerposts" class="pagetitle"><h1>Forum: '.Sanitize::encodeStringForDisplay($forumname).'</h1></div>';
 	echo "<b style=\"font-size: 120%\">"._('Post').': '. $re[$threadid] . Sanitize::encodeStringForDisplay($subject[$threadid]) . "</b><br/>\n";
 
-	echo '<div class="fixedonscroll">';
+	echo '<div class="stickyonscroll">';
 	if ($prevth != '') {
 		echo "<a href=\"posts.php?cid=$cid&forum=$prevthforum&thread=".Sanitize::onlyInt($prevth)."&page=$page&grp=".Sanitize::onlyInt($groupid)."\">Prev</a> ";
 	} else {
@@ -555,7 +617,7 @@ echo "<a href=\"posts.php?view=$view&cid=$cid&forum=$forumid&page=$page&thread=$
 function printchildren($base,$restricttoowner=false) {
 	$curdir = rtrim(dirname(__FILE__), '/\\');
 	global $DBH,$children,$date,$subject,$re,$message,$poster,$email,$forumid,$threadid,$isteacher,$cid,$userid,$ownerid,$points;
-	global $feedback,$posttype,$lastview,$myrights,$allowreply,$allowmod,$allowdel,$allowlikes,$view,$page,$allowmsg;
+	global $feedback,$posttype,$lastview,$myrights,$allowreply,$allowmod,$allowdel,$allowlikes,$view,$page,$allowmsg,$userrole;
 	global $haspoints,$imasroot,$postby,$replyby,$files,$CFG,$rubric,$pointsposs,$hasuserimg,$urlmode,$likes,$mylikes,$section;
 	global $canviewall, $caneditscore, $canviewscore, $isstu, $posttoforumaidver, $posttoforumqn, $posttoforumaid, $staticroot;
 	if (!isset($CFG['CPS']['itemicons'])) {
@@ -577,9 +639,12 @@ function printchildren($base,$restricttoowner=false) {
 		if ($date[$child]>$lastview) {
 			echo ' newglow';
 		}
+		if (!empty($userrole[$child])) {
+			echo ' postrole-'.$userrole[$child];
+		}
 		echo '" tabindex=-1>';
 		echo '<div class="block flexgroup">';
-		echo '<span class=nowrap>';
+		//echo '<span class=nowrap>';
 		if (isset($children[$child])) {
 			if ($view==1) {
 				$lbl = '+';
@@ -588,7 +653,7 @@ function printchildren($base,$restricttoowner=false) {
 				$lbl = '-';
 				$img = "collapse";
 			}
-			echo '<button class="plain nopad" aria-controls="childwrap'.$child.'" aria-expanded="'.($view==1?'false':'true').'" onClick="toggleshow(this)">';
+			echo '<button type=button class="plain nopad" aria-controls="childwrap'.$child.'" aria-expanded="'.($view==1?'false':'true').'" onClick="toggleshow(this)">';
 			echo "<img class=\"expcol\" src=\"$staticroot/img/$img.gif\" alt=\"Expand/Collapse\" /></button>";
 		}
 		if ($hasuserimg[$child]==1) {
@@ -600,7 +665,7 @@ function printchildren($base,$restricttoowner=false) {
 			}
 			echo '</button>';
 		}
-		echo '</span>';
+		//echo '</span>';
 		echo '<span style="flex-grow:1">';
 		echo "<b>".$re[$child]. Sanitize::encodeStringForDisplay($subject[$child]) . "</b><br/>"._('Posted by').": ";
 		//if ($isteacher && $ownerid[$child]!=0) {
@@ -616,6 +681,13 @@ function printchildren($base,$restricttoowner=false) {
 		echo '<span class="pii-full-name">'.Sanitize::encodeStringForDisplay($poster[$child]).'</span>'; // This is the user's first and last name.
 		if (($canviewall || $allowmsg) && $ownerid[$child]!=0) {
 			echo "<span class=\"sr-only\">send message</span></a>";
+		}
+		if (!empty($userrole[$child])) {
+			if ($userrole[$child] === 'instructor') {
+				echo ' ('._('Instructor').')';
+			} else if ($userrole[$child] === 'tutor') {
+				echo ' ('._('Tutor/TA').')';
+			} 
 		}
 		if ($isteacher && $ownerid[$child]!=0 && $ownerid[$child]!=$userid) {
 			echo " <a class=\"small\" href=\"$imasroot/course/gradebook.php?cid=$cid&stu={$ownerid[$child]}\" target=\"_blank\">[GB]</a>";

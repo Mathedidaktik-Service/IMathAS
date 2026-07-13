@@ -19,7 +19,7 @@ if (!(isset($teacherid))) {
 } else { //PERMISSIONS ARE OK, PERFORM DATA MANIPULATION
 
     $cid = Sanitize::courseId($_GET['cid']);
-    $aid = Sanitize::onlyInt($_GET['aid']);
+    $aid = Sanitize::onlyInt($_GET['aid'] ?? 0);
 
     if (!empty($_GET['from']) && $_GET['from'] == 'addq2') {
         $addq = 'addquestions2';
@@ -28,11 +28,14 @@ if (!(isset($teacherid))) {
         $addq = 'addquestions';
         $from = 'addq';
     }
-    $query = "SELECT iar.userid FROM imas_assessment_records AS iar,imas_students WHERE ";
-    $query .= "iar.assessmentid=:assessmentid AND iar.userid=imas_students.userid AND imas_students.courseid=:courseid";
-    $stm = $DBH->prepare($query);
-    $stm->execute(array(':assessmentid' => $aid, ':courseid' => $cid));
-    $beentaken = ($stm->rowCount() > 0);
+    $beentaken = false;
+    if ($aid > 0) {
+        $query = "SELECT iar.userid FROM imas_assessment_records AS iar,imas_students WHERE ";
+        $query .= "iar.assessmentid=:assessmentid AND iar.userid=imas_students.userid AND imas_students.courseid=:courseid";
+        $stm = $DBH->prepare($query);
+        $stm->execute(array(':assessmentid' => $aid, ':courseid' => $cid));
+        $beentaken = ($stm->rowCount() > 0);
+    }
 
     $curBreadcrumb = "$breadcrumbbase <a href=\"course.php?cid=$cid\">" . Sanitize::encodeStringForDisplay($coursename) . "</a> ";
     $curBreadcrumb .= "&gt; <a href=\"$addq.php?aid=$aid&cid=$cid\">" . _("Add/Remove Questions") . "</a> &gt; ";
@@ -41,7 +44,7 @@ if (!(isset($teacherid))) {
     if (!empty($_GET['process'])) {
         $stm = $DBH->prepare("SELECT itemorder,defpoints,intro FROM imas_assessments WHERE id=:id AND courseid=:cid");
         $stm->execute(array(':id' => $aid, ':cid'=>$cid));
-        list($itemorder, $defpoints, $intro) = $stm->fetch(PDO::FETCH_NUM);
+        list($itemorder, $defpoints, $intro) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null,null];
         if ($itemorder === null || $itemorder === false) {
             echo 'Invalid aid';
             exit;
@@ -138,6 +141,7 @@ if (!(isset($teacherid))) {
                 }
             }
             if ($stm->rowCount() > 0 && $beentaken && count($changes) > 0) {
+                $changes['aid'] = $aid;
                 TeacherAuditLog::addTracking(
                     $cid,
                     "Question Settings Change",
@@ -258,6 +262,10 @@ if (!(isset($teacherid))) {
             if ($line['fixedseeds'] === null) {$line['fixedseeds'] = '';}
             $qsetid = $line['questionsetid'];
         } else {
+            if (empty($_GET['qsetid'])) {
+				echo 'Missing qsetid';
+				exit;
+			}
             //set defaults
             $line['points'] = "";
             $line['attempts'] = "";

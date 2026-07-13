@@ -109,7 +109,7 @@ if (!isset($teacherid) && !isset($tutorid) && !isset($studentid) && !isset($inst
 		header('Location: ' . $GLOBALS['basesiteurl'] . "/course/course.php?cid=".Sanitize::courseId($_GET['cid']).$btf . "&r=" . Sanitize::randomQueryStringParam());
 	}
 
-	$stm = $DBH->prepare("SELECT name,itemorder,allowunenroll,msgset,toolset,latepasshrs FROM imas_courses WHERE id=:id");
+	$stm = $DBH->prepare("SELECT name,itemorder,allowunenroll,msgset,toolset FROM imas_courses WHERE id=:id");
 	$stm->execute(array(':id'=>$cid));
 	$line = $stm->fetch(PDO::FETCH_ASSOC);
 	if ($line == null) {
@@ -122,8 +122,31 @@ if (!isset($teacherid) && !isset($tutorid) && !isset($studentid) && !isset($inst
 	$items = unserialize($line['itemorder']);
 	$msgset = $line['msgset']%5;
 	$toolset = $line['toolset'];
-	$latepasshrs = $line['latepasshrs'];
 	$useleftnav = true;
+
+	if (isset($_GET['blockid']) && $_GET['blockid']!=='') {
+		require_once "../includes/courselinkinc.php";
+		$resolvedpath = findBlockPath($items, intval($_GET['blockid']));
+		if ($resolvedpath !== false) {
+			// redirect so last-location-tracking sessionstorage can log last block
+			header('Location: ' . $GLOBALS['basesiteurl'] . "/course/course.php?cid=".Sanitize::courseId($_GET['cid']).'&folder='.$resolvedpath);
+			exit;
+			//$_GET['folder'] = $resolvedpath;
+		}
+	} else if (isset($_GET['showinline']) && $_GET['showinline']!=='') {
+		require_once "../includes/courselinkinc.php";
+		$stm = $DBH->prepare("SELECT id FROM imas_items WHERE courseid=:courseid AND itemtype='InlineText' AND typeid=:typeid");
+		$stm->execute(array(':courseid' => $cid, ':typeid' => intval($_GET['showinline'])));
+		$leafitemid = $stm->fetchColumn();
+		if ($leafitemid !== false) {
+			$resolvedpath = findLeafParentPath($items, $leafitemid);
+			if ($resolvedpath !== false) {
+				header('Location: ' . $GLOBALS['basesiteurl'] . "/course/course.php?cid=".Sanitize::courseId($_GET['cid']).'&folder='.$resolvedpath.'#inline'.intval($_GET['showinline']));
+				exit;
+				//$_GET['folder'] = $resolvedpath;
+			}
+		}
+	}
 
 	if (isset($teacherid) && isset($_GET['togglenewflag'])) { //handle toggle of NewFlag
 		$sub =& $items;
@@ -346,16 +369,17 @@ if (!isset($teacherid) && !isset($tutorid) && !isset($studentid) && !isset($inst
 		$query .= "AND (imas_forums.avail=2 OR (imas_forums.avail=1 AND imas_forums.startdate<$now && imas_forums.enddate>$now)) ";
 	}
 	$query .= "LEFT JOIN imas_forum_views as mfv ON mfv.threadid=imas_forum_threads.id AND mfv.userid=:userid ";
-	$query .= "WHERE imas_forum_threads.lastposttime<:now AND (imas_forum_threads.lastposttime>mfv.lastview OR (mfv.lastview IS NULL)) ";
+	$query .= "WHERE imas_forum_threads.lastposttime<:now AND imas_forum_threads.lastposttime>:old ";
+	$query .= "AND (imas_forum_threads.lastposttime>mfv.lastview OR (mfv.lastview IS NULL)) ";
 	if (!isset($teacherid)) {
 		$query .= "AND (imas_forum_threads.stugroupid=0 OR imas_forum_threads.stugroupid IN (SELECT stugroupid FROM imas_stugroupmembers WHERE userid=:userid2)) ";
 	}
 	$query .= "GROUP BY imas_forums.id";
 	$stm = $DBH->prepare($query);
 	if (!isset($teacherid)) {
-		$stm->execute(array(':now'=>$now, ':courseid'=>$cid, ':userid'=>$userid, ':userid2'=>$userid));
+		$stm->execute(array(':now'=>$now, ':old'=>$now - 365*24*60*60, ':courseid'=>$cid, ':userid'=>$userid, ':userid2'=>$userid));
 	} else {
-		$stm->execute(array(':now'=>$now, ':courseid'=>$cid, ':userid'=>$userid));
+		$stm->execute(array(':now'=>$now, ':old'=>$now - 365*24*60*60, ':courseid'=>$cid, ':userid'=>$userid));
 	}
 
 

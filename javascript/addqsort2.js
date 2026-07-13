@@ -153,6 +153,9 @@ function refreshTable() {
     $("[id^=pts],[id^=grppts],#defpts")
         .off("change.pts")
         .on("change.pts", updatePts);
+    $("[id^=drilldispname]")
+        .off("change.drilldispname")
+        .on("change.drilldispname", updateDispNames);
     $("#curqtbl *").off("focus.tracker")
         .on("focus.tracker", function(e) {
             var col = $(this).closest("td,th").index();
@@ -530,14 +533,14 @@ function generateMoveSelect2(num) {
         }
         if (curistxt) {
             sel += ">Text" + tcnt + "</option>";
-        } else if (itemarray[i - 1].length < 5 && itemarray[i - 1][0] > 1) {
+        } else if (itemarray[i - 1].length < 6 && itemarray[i - 1][0] > 1) {
             sel += ">Q" + qcnt + "-" + (qcnt + itemarray[i - 1][0] - 1) + "</option>";
         } else {
             sel += ">Q" + qcnt + "</option>";
         }
 
         if (!curistxt) {
-            if (itemarray[i - 1].length < 5) {
+            if (itemarray[i - 1].length < 6) {
                 //is group
                 qcnt += parseInt(itemarray[i - 1][0]);//itemarray[i-1][2].length;
             } else {
@@ -613,7 +616,7 @@ function generateShowforSelect(num) {
         i++;
     }
     while (i < itemarray.length && itemarray[i][0] != "text") {
-        if (itemarray[i].length < 5) {
+        if (itemarray[i].length < 6) {
             //is group
             n += itemarray[i][0]; //pick n from group
         } else {
@@ -683,9 +686,9 @@ function moveitem2(from) {
             if (from < to) {
                 to--;
             }
-            if (itemarray[to - 1].length < 5) {
+            if (itemarray[to - 1].length < 6) {
                 //to is already group
-                if (tomove[0].length < 5) {
+                if (tomove[0].length < 6) {
                     //if grouping a group
                     for (var j = 0; j < tomove[0][2].length; j++) {
                         itemarray[to - 1][2].push(tomove[0][2][j]);
@@ -696,12 +699,12 @@ function moveitem2(from) {
             } else {
                 //to is not group
                 var existing = itemarray[to - 1];
-                if (tomove[0].length < 5) {
+                if (tomove[0].length < 6) {
                     //if grouping a group
                     tomove[0][2].push(existing);
                     itemarray[to - 1] = tomove[0];
                 } else {
-                    itemarray[to - 1] = [1, 0, [existing, tomove[0]], 1];
+                    itemarray[to - 1] = [1, 0, [existing, tomove[0]], 1, ''];
                 }
             }
         }
@@ -757,6 +760,13 @@ function fullungroup(loc) {
     return false;
 }
 
+function selallgroup(loc) {
+    $("#curqtbl input[name^=checked][value^="+loc+"-]").prop("checked", true);
+}
+function unselallgroup(loc) {
+    $("#curqtbl input[name^=checked][value^="+loc+"-]").prop("checked", false);
+}
+
 function togglegroupEC(loc) {
     var newec = 1 - itemarray[loc][2][0][9];
     for (var i=0; i<itemarray[loc][2].length; i++) {
@@ -769,7 +779,7 @@ function togglegroupEC(loc) {
 function doremoveitem(loc) {
     if (loc.indexOf("-") > -1) {
         locparts = loc.split("-");
-        if (itemarray[locparts[0]].length < 5) {
+        if (itemarray[locparts[0]].length < 6) {
             //usual
             itemarray[locparts[0]][2].splice(locparts[1], 1);
             if (itemarray[locparts[0]][2].length == 1) {
@@ -851,7 +861,7 @@ function groupSelected() {
     }
     var to = grplist[grplist.length - 1];
     var existingcnt = 0;
-    if (itemarray[to].length < 5) {
+    if (itemarray[to].length < 6) {
         //moving to existing group
         existingcnt = itemarray[to][2].length;
         if (grppoints == 0) {
@@ -864,13 +874,13 @@ function groupSelected() {
             grppoints = existing[4]; //point values from this question
             grpextracredit = existing[9];
         }
-        itemarray[to] = [1, 0, [existing], 1];
+        itemarray[to] = [1, 0, [existing], 1, ''];
         existingcnt = 1;
     }
     for (i = 0; i < grplist.length - 1; i++) {
         //going from last in current to first in current
         tomove = itemarray.splice(grplist[i], 1);
-        if (tomove[0].length < 5) {
+        if (tomove[0].length < 6) {
             //if grouping a group
             for (var j = 0; j < tomove[0][2].length; j++) {
                 //itemarray[to][2].push(tomove[0][2][j]);
@@ -897,6 +907,7 @@ function updatePts() {
         var newdefpts = Math.ceil($("#defpts").val());
         $("#defpts").val(newdefpts);
         var olddefpts = $("#defpts").attr("data-lastval");
+        var haschg = false;
         if (newdefpts == "" || newdefpts <= 0) {
             newdefpts = olddefpts;
             $("#defpts").val(olddefpts);
@@ -911,6 +922,9 @@ function updatePts() {
             if (newdefpts != olddefpts && curval == olddefpts) {
                 //update pts to match new default
                 curval = newdefpts;
+                haschg = true;
+            } else if (curval != $(this).attr("data-lastval")) {
+                haschg = true;
             }
             itemarray[qparts[1]][4] = curval == newdefpts ? 9999 : curval;
         });
@@ -923,11 +937,32 @@ function updatePts() {
             if (newdefpts != olddefpts && curval == olddefpts) {
                 //update pts to match new default
                 curval = newdefpts;
+                haschg = true;
+            } else if (curval != $(this).attr("data-lastval")) {
+                haschg = true;
             }
             for (var i = 0; i < itemarray[qparts[1]][2].length; i++) {
                 itemarray[qparts[1]][2][i][4] = curval == newdefpts ? 9999 : curval;
             }
         });
+        if (haschg) {
+            submitChanges();
+        }
+    }
+}
+
+function updateDispNames() {
+    var haschg = false;
+    $("[id^=drilldispname]").each(function () {
+        var qkey = "qn" + $(this).attr("data-qid");
+        var newval = $(this).val();
+        if (newval != $(this).attr("data-lastval")) {
+            haschg = true;
+            $(this).attr("data-lastval", newval);
+        }
+        drillDispNames[qkey] = newval;
+    });
+    if (haschg) {
         submitChanges();
     }
 }
@@ -957,6 +992,19 @@ function updateGrpT(num, old_type) {
         document.getElementById("grptype" + num).value != itemarray[num][1]
     ) {
         itemarray[num][1] = document.getElementById("grptype" + num).value;
+        submitChanges();
+    }
+}
+
+function updateGrpLabel(num) {
+    var grplabelval = document.getElementById("grplabel-" + num).value.replace(/[|'"~,]/g,'');
+    if (!confirm_textseg_dirty()) {
+        //if aborted, restore old value
+        $("#grplabel-" + num).val(itemarray[num][4]);
+    } else if (
+        grplabelval != itemarray[num][4]
+    ) {
+        itemarray[num][4] = grplabelval;
         submitChanges();
     }
 }
@@ -1090,13 +1138,13 @@ function generateOutput() {
                 pagetitle: itemarray[i][4],
                 forntype: itemarray[i][5]
             });
-        } else if (itemarray[i].length < 5) {
+        } else if (itemarray[i].length < 6) {
             //is group
             if (itemarray[i][2].length > 0) { // skip if group is empty; shouldn't happen
                 if (out.length > 0) {
                     out += ",";
                 }
-                out += itemarray[i][0] + "|" + itemarray[i][1];
+                out += itemarray[i][0] + "|" + itemarray[i][1] + "|" + (itemarray[i][4] ?? '').replace(/[|'"~,]/g,'');
                 for (var j = 0; j < itemarray[i][2].length; j++) {
                     out += "~" + itemarray[i][2][j][0];
                     pts["qn" + itemarray[i][2][j][0]] = itemarray[i][2][j][4];
@@ -1134,7 +1182,7 @@ function updateqgrpcookie() {
         if (itemarray[i][0] == "text") {
             continue;
         }
-        if (itemarray[i].length < 5) {
+        if (itemarray[i].length < 6) {
             //is group
             if (itemarray[i][3] == 0) {
                 closegrp.push(qcnt);
@@ -1153,6 +1201,10 @@ function generateTable() {
     var pttotal = 0;
     var html = "";
     var totalcols = 10;
+    var tottime = 0;
+    var totstdev = 0;
+    var totcnt = 0;
+    var totmissing = false;
 
     html += "<table cellpadding=5 class='gb questions-in-assessment'><thead><tr>";
     if (!beentaken) {
@@ -1201,14 +1253,38 @@ function generateTable() {
             var curitems = new Array();
             curitems[0] = itemarray[i];
             curistext = 1;
-        } else if (itemarray[i].length < 5) {
+        } else if (itemarray[i].length < 6) {
             //is group
             curitems = itemarray[i][2];
             curisgroup = 1;
+            var grptime = 0;
+            var grpstdev = 0;
+            var grpcnt = 0;
+            for (var k=0; k<curitems.length; k++) {
+                if (curitems[k][8][3] < 5) {
+                    totmissing = true;
+                } else {
+                    grptime += curitems[k][8][0];
+                    grpstdev += curitems[k][8][4];
+                    grpcnt++;
+                }
+            }
+            if (grpcnt>0) {
+                tottime += grptime * itemarray[i][0]/grpcnt;
+                totstdev += grpstdev * itemarray[i][0]/grpcnt;
+                totcnt += itemarray[i][0];
+            }
         } else {
             //not group
             var curitems = new Array();
             curitems[0] = itemarray[i];
+            if (itemarray[i][8][3] < 5) {
+                totmissing = true;
+            } else {
+                tottime += itemarray[i][8][0];
+                totstdev += itemarray[i][8][4];
+                totcnt++;
+            }
         }
         curqitemloc = i - text_segment_count;
         //var ms = generateMoveSelect(i,itemcount);
@@ -1233,6 +1309,7 @@ function generateTable() {
                 } else {
                     curgrppoints = curitems[0][4];
                 }
+                
             }
             if (beentaken) {
                 if (curisgroup) {
@@ -1361,6 +1438,17 @@ function generateTable() {
                             html += "selected=1";
                         }
                         html += ">" + _("With") + "</option></select>" + _(" replacement") + '</label>';
+                        if (displaymethod == 'drill') {
+                            html += '<br/><label class="small">' + _("Display name") + ': ';
+                            html += '<input size=18 type=text id="grplabel-' + i + '" ' +
+                                    'value="' + (itemarray[i][4] ?? '') + '" ' +
+                                    'onchange="updateGrpLabel(' + i + ')"/></label>';
+                        } else {
+                            html += '. <label class="nowrap">' + _("Label") + ': ';
+                            html += '<input size=20 type=text id="grplabel-' + i + '" ' +
+                                    'value="' + (itemarray[i][4] ?? '') + '" ' +
+                                    'onchange="updateGrpLabel(' + i + ')"/></label>';
+                        }
                         html += "</td>";
                         html +=
                             '<td class="nowrap c"><input size=2 type=number min=0 step=1 id="grppts-' +
@@ -1392,6 +1480,14 @@ function generateTable() {
                         html +=
                             '<li><a href="#" onclick="return togglegroupEC(' + i + ');">' +
                             _("Toggle Extra Credit") +
+                            "</a></li>";
+                        html +=
+                            '<li><a href="#" onclick="return selallgroup(' + i + ');">' +
+                            _("Select all in group") +
+                            "</a></li>";
+                        html +=
+                            '<li><a href="#" onclick="return unselallgroup(' + i + ');">' +
+                            _("Un-select all in group") +
                             "</a></li>";
                         html += '</ul></div></td></tr>';
 
@@ -1578,7 +1674,19 @@ function generateTable() {
                     curitems[j][1] +
                     '"/>';
                 
-                html += '<label for="qc'+ln+'" id="qsd'+ln+'">' + curitems[j][2] + "</label></td>"; //description
+                html += '<label for="qc'+ln+'" id="qsd'+ln+'">' + curitems[j][2] + "</label>"; //description
+                if (displaymethod == 'drill' && !curisgroup) {
+                    // grouped (pool) questions use the group's display name
+                    // (see the group header row) instead of an individual one
+                    var dispnameval = drillDispNames['qn' + curitems[j][0]] || '';
+                    html +=
+                        '<br/><label class="small">' + _('Display name') + ': ' +
+                        '<input type="text" size="18" id="drilldispname' + ln + '" ' +
+                        'data-qid="' + curitems[j][0] + '" ' +
+                        'placeholder="' + curitems[j][2] + '" ' +
+                        'value="' + dispnameval + '" data-lastval="' + dispnameval + '"/></label>';
+                }
+                html += "</td>";
                 html += '<td class="nowrap">';
                 if ((curitems[j][7] & 32) == 32) {
                     html += '<span title="' + _('Show Work') + '">' + 
@@ -1610,21 +1718,15 @@ function generateTable() {
                     var altaddWE = _(" disabled");
                 }
                 if ((curitems[j][7] & 4) == 4) {
-                    if ((curitems[j][7] & 16) == 16) {
-                        html += '<div class="ccvid inlinediv"';
-                        var altbase = _("Captioned video");
-                    } else {
-                        html += '<div class="inlinediv"';
-                        var altbase = _("Video");
-                    }
-                    
+                    html += '<div class="inlinediv"';
+                    var altbase = ((curitems[j][7] & 16) == 16) ? _("Captioned video") : _("Video");
                     html += 'title="'+altbase+altadd+'">';
                     html +=
-                        '<img src="' +
+                        '<img width=16 src="' +
                         staticroot +
-                        "/img/video_tiny" +
+                        "/img/video2" + ((curitems[j][7] & 16) == 16 ? 'cc' : '') +
                         showicons +
-                        '.png" alt="' +
+                        '.svg" alt="' +
                         altbase +
                         altadd +
                         '"/>';
@@ -1632,11 +1734,11 @@ function generateTable() {
                 }
                 if ((curitems[j][7] & 2) == 2) {
                     html +=
-                        '<img src="' +
+                        '<img width=16 src="' +
                         staticroot +
-                        "/img/html_tiny" +
+                        "/img/page" +
                         showicons +
-                        '.png" alt="'+_('Help Resource') +
+                        '.svg" alt="'+_('Help Resource') +
                         altadd +
                         '" title="'+_('Help Resource') +
                         altadd +
@@ -1646,9 +1748,9 @@ function generateTable() {
                     html +=
                         '<img src="' +
                         staticroot +
-                        "/img/assess_tiny" +
+                        "/img/written" +
                         showiconsWE +
-                        '.png" alt="'+('Written example') +
+                        '.svg" alt="'+('Written example') +
                         altadd +
                         '" title="'+('Written example') +
                         altaddWE +
@@ -1685,7 +1787,9 @@ function generateTable() {
                     html +=
                         "<br/>"+_("Avg time on first try: ") +
                         curitems[j][8][2] +
-                        _(" min")+"<br/>N=" +
+                        _(" min")+"<br/>&sigma;="+
+                        curitems[j][8][4] +
+                        "<br/>N=" +
                         curitems[j][8][3] +
                         '\')" onmouseout="tipout()">';
                     
@@ -1930,6 +2034,9 @@ function generateTable() {
             ) +
             ".</p>";
     }
+    $("#avgtimemissing").toggle(totmissing);
+    $("#avgtimetotal").text(Math.round(10*tottime)/10);
+    $("#p95timetotal").text(Math.round(tottime + 1.645*totstdev));
     document.getElementById("pttotal").textContent = pttotal;
 
     return html;
@@ -1965,7 +2072,7 @@ function check_textseg_itemarray() {
             numq = 0;
             j = i + 1;
             while (j < itemarray.length && itemarray[j][0] != "text") {
-                if (itemarray[j].length < 5) {
+                if (itemarray[j].length < 6) {
                     //is group
                     numq += parseInt(itemarray[j][0]);
                 } else {
@@ -2009,7 +2116,9 @@ function confirm_textseg_dirty() {
     return discard_other_changes;
 }
 
+var inTransit = false;
 function submitChanges() {
+    if (inTransit) { return; }
     var target = "submitnotice";
     check_textseg_itemarray();
     document.getElementById(target).textContent = _(" Saving Changes... ");
@@ -2027,6 +2136,10 @@ function submitChanges() {
     } else {
         outdata["extracredit"] = JSON.stringify(data[3]);
     }
+    if (displaymethod == 'drill') {
+        outdata["dispnames"] = JSON.stringify(drillDispNames);
+    }
+    inTransit = true;
     $.ajax({
         type: "POST",
         url: AHAHsaveurl,
@@ -2038,6 +2151,7 @@ function submitChanges() {
                 document.getElementById("statusmsg").textContent = msg;
                 itemarray = olditemarray.slice();
                 refreshTable();
+                inTransit = false;
                 return;
             }
             if (!beentaken) {
@@ -2057,6 +2171,7 @@ function submitChanges() {
             ) {
                 $(window).scrollTop(0);
             }
+            inTransit = false;
         })
         .fail(function (xhr, status, errorThrown) {
             document.getElementById(target).textContent =
@@ -2069,6 +2184,7 @@ function submitChanges() {
             document.getElementById("statusmsg").textContent = _("Error saving");
             itemarray = olditemarray.slice();
             refreshTable();
+            inTransit = false;
         });
 }
 
@@ -2080,6 +2196,7 @@ function addusingdefaults(asgroup) {
         checked.push(this.value);
     });
     if (checked.length == 0) { return; }
+    if (checked.length == 1) { asgroup = false; }
     document.getElementById("statusmsg").textContent = _("Adding questions");
     $.ajax({
         type: "POST",

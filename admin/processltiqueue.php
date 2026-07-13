@@ -127,8 +127,10 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 						'ver' => 'LTI1.3',
 						'action' => 'update',
 						'ltiuserid' => $ltiuserid,
+						'hash' => $row['hash'],
 						'platformid' => $platformid,
-						'grade' => max(0, $row['grade']),
+						'grade' => $row['grade'],
+						'ptsposs' => $row['ptsposs'],
                         'isstu' => $row['isstu'],
                         'addedon' => $row['addedon']
 					),
@@ -174,7 +176,11 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
             $secret = '';
             if (strlen($lti_sourcedid)>1 && strlen($ltiurl)>1 && strlen($ltikey)>1) {
                 debuglog('queing 1.1 request for '.$row['hash']);
-                $grade = min(1, max(0, $row['grade']));
+				if ($row['ptsposs'] > 0) {
+					$grade = $row['grade'] / $row['ptsposs'];
+				} else {
+					$grade = 0;
+				}
                 $RCX->addRequest(
                     $ltiurl,  //url to request
                     array( 		//post data; will get transformed before send
@@ -227,8 +233,10 @@ if (count($round2)>0 &&  $timeused < 40) {
 						'ver' => 'LTI1.3',
 						'action' => 'update',
 						'ltiuserid' => $ltiuserid,
+						'hash' => $row['hash'],
 						'platformid' => $platformid,
-						'grade' => max(0, $row['grade']),
+						'grade' => $row['grade'],
+						'ptsposs' => $row['ptsposs'],
                         'isstu' => $row['isstu'],
                         'addedon' => $row['addedon']
 					),
@@ -285,7 +293,7 @@ function LTIqueuePostdataCallback($data) {
                 $updater1p3->token_valid($data['platformid'])
             ) { // double check we have a valid token
 				$token = $updater1p3->get_access_token($data['platformid']);
-				return $updater1p3->get_update_body($token, $data['grade'], $data['ltiuserid'], $data['isstu'], $data['addedon']);
+				return $updater1p3->get_update_body($token, $data['grade'], $data['ptsposs'], $data['ltiuserid'], $data['hash'], $data['isstu'], $data['addedon']);
 			} else {
 				return false;
 			}
@@ -334,7 +342,7 @@ function LTIqueueCallback($response, $url, $request_info, $user_data, $time) {
 			// was a token request
 			if ($response === false) {
 				// record failure. in round 2 token will be read as not valid
-				$updater1p3->token_request_failure($user_data['platformid'], $request_info['response_text'], $request_info['error'] . ' code ' . $request_info['http_code']);
+				$updater1p3->token_request_failure($user_data['platformid'], $request_info['response_text'], ($request_info['error'] ?? '(no err)') . ' code ' . $request_info['http_code']);
 				debuglog('token request failure t1 '.$user_data['platformid']);
                 return;
 			}
@@ -344,7 +352,7 @@ function LTIqueueCallback($response, $url, $request_info, $user_data, $time) {
 				debuglog('got token for '.$user_data['platformid']);
 			} else {
                 // record failure. in round 2 token will be read as not valid
-				$updater1p3->token_request_failure($user_data['platformid'], $response . $request_info['response_text'], $request_info['error'] . ' code ' . $request_info['http_code']);
+				$updater1p3->token_request_failure($user_data['platformid'], $response . $request_info['response_text'], ($request_info['error'] ?? '(no err)') . ' code ' . $request_info['http_code']);
 				debuglog('token request failure t2 '.$response);
 			}
 			return; // doesn't effect ltiqueue, so return now

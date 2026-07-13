@@ -48,7 +48,6 @@ function AutoSuggest(elem, suggestions)
 	//A div to use to create the dropdown.
 	this.div = document.getElementById("autosuggest");
 
-
 	//Do you want to remember what keycode means what? Me neither.
 	var TAB = 9;
 	var ESC = 27;
@@ -410,6 +409,7 @@ var idCounter = 0;
 
 /**  END AUTOSUGGEST CODE **/
 //Remaining code is (c) 2010 David Lippman, IMathAS project
+var trs;
 var names = [];
 function initsuggest() {
 	var table = document.getElementById("myTable");

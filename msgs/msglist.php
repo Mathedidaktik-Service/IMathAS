@@ -435,7 +435,7 @@ if (isset($_GET['add'])) {
 		} else if (isset($_GET['quoteq'])) {
 			$parts = explode('-', $_GET['quoteq']);
 			$GLOBALS['assessver'] = Sanitize::onlyInt($parts[4]);
-			if ($courseUIver > 1) {
+			if (!isset($courseUIver) || $courseUIver > 1) {
 				require_once '../assess2/AssessStandalone.php';
 				$a2 = new AssessStandalone($DBH);
 				$state = array(
@@ -446,7 +446,7 @@ if (isset($_GET['add'])) {
 				$a2->loadQuestionData();
 				$res = $a2->displayQuestion($parts[0], ['showhints' => false]);
 				$message = $res['html'];
-				$message = preg_replace('/<div class="question"[^>]*>/', '<div>', $message);
+				$message = preg_replace('/<div class="question[^>]*>/', '<div>', $message);
 			} else {
 				require_once "../assessment/displayq2.php";
 				$message = displayq($parts[0], $parts[1], $parts[2], false, false, 0, true);

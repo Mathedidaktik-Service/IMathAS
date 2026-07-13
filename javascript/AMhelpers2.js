@@ -120,6 +120,13 @@ function init(paramarr, enableMQ, baseel) {
     allParams[qn] = paramarr[qn];
     params = paramarr[qn];
 
+    if (params.disableoncorrect) {
+      el = document.getElementById("qn"+qn);
+      if (el.classList.contains("ansgrn")) {
+        el.setAttribute('disabled', true);
+      }
+    }
+
     if (params.helper && params.qtype.match(/^(calc|numfunc|string|interval|matrix|chemeqn|complexmatrix|alg)/)) { //want mathquill
       el = document.getElementById("qn"+qn);
       if (!el && !params.matrixsize) { continue; }
@@ -143,14 +150,20 @@ function init(paramarr, enableMQ, baseel) {
         }
       }
 
-      if (enableMQ) {
+      if (enableMQ && $(el).closest('.mqinnerfillin').length===0) {
         if (params.matrixsize) {
           MQeditor.toggleMQAll("input[id^=qn"+qn+"-]", true, true);
         } else {
           MQeditor.toggleMQ(el, true, true);
         }
         $("#pbtn"+qn).hide();
+      } 
+      /* 
+      // need to not disable to allow toggling to work
+      else if (enableMQ) { // and in mqinnerfillin
+        params.preview = false; // don't show preview
       }
+      */
     }
     if (params.preview) { //setup preview TODO: check for userpref
       document.getElementById("pbtn"+qn).addEventListener('click', (function(thisqn) {
@@ -248,6 +261,7 @@ function init(paramarr, enableMQ, baseel) {
   }
   initDupRubrics();
   initShowAnswer2();
+  toggleMQfillins(enableMQ, baseel);
   if (baseel) {
     setScoreMarkers(baseel);
   }
@@ -263,9 +277,13 @@ function init(paramarr, enableMQ, baseel) {
             loadedscripts.push(paramarr.scripts[i][1]);
         }
     }
+
     if (scriptqueue.length > 0 && processingscriptsqueue === false) {
         processScriptQueue();
     }
+  }
+  if (initstack.length > 0 && processingscriptsqueue === false) {
+    processScriptQueueNext();
   }
 }
 
@@ -541,6 +559,113 @@ function initShowAnswer() {
 				.removeClass("hidden");
 		});
 	});
+}
+
+function toggleMQfillins(enableMQ, baseel) {
+  baseel = baseel || "body"
+  if (enableMQ) {
+    $(baseel).find(".mqinnerfillin > .mqfillin-alt").hide();
+    $(baseel).find(".mqinnerfillin > .mqfillin-mq").show();
+    $(baseel).find(".mqinnerfillin").each(function(i,el) {
+      var inp = el.getElementsByClassName('mqfillin-mq')[0];
+      var holder = el.getElementsByClassName('mqfillin-alt')[0];
+      var map = [];
+      var thisq = parseInt($(el).closest('[id^=questionwrap]').attr('id').substring(12));
+      var innerfieldCnt = 0;
+      var initinput = holder.getAttribute('data-form').replace(/innertmpfield\((\d+)\)/g, function(m,n) {
+        var qnref = 1000*(thisq+1) + parseInt(n);
+        map[innerfieldCnt] = qnref;
+        innerfieldCnt++;
+        return 'innerfield('+(innerfieldCnt-1)+')'; // placeholder; replace below
+      })
+      inp.innerText = AMtoMQ(initinput);
+      var newmap = [];
+      for (var i=0;i<map.length;i++) {
+        var srcref = document.getElementById('qn'+map[i]);
+        if (!srcref.hasAttribute('data-mq')) {
+          srcref.setAttribute('data-mq','');
+        }
+        var innermqtext = toMQwVars(srcref.value, srcref.id);
+        if (srcref.disabled) {
+          var m;
+          var cl = 'mqinnerboxed disabled';
+          if ((m = srcref.className.match(/(ansgrn|ansred|ansyel|ansorg)/)) !== null) {
+            cl += ' ' + m[0];
+          }
+          cl += ' mqinnerref'+map[i];
+          inp.innerText = inp.innerText.replace('\\MathQuillMathField{{{'+i+'}}}', '\\class{'+cl+'}{'+innermqtext+'}');
+        } else {
+          inp.innerText = inp.innerText.replace('\\MathQuillMathField{{{'+i+'}}}', '\\MathQuillMathField{'+innermqtext+'}');
+          newmap.push(map[i]);
+        }
+      }
+      // update map after removing disabled
+      var origmap = map;
+      map = newmap;
+      var mqinp = MQ.StaticMath(inp);
+      for (var i=0;i<map.length;i++) {
+        var qnref = map[i];
+        var el = document.getElementById('qn'+qnref);
+        var thisconf = MQeditor.makeMQconfig(el);
+        thisconf.handlers.edit = function(mf) {
+            var target = mf.__controller.container;
+            var m;
+            if ((m = target.className.match(/(ansgrn|ansred|ansyel|ansorg)/)) !== null) {
+              $(target).removeClass(m[0]);
+            }
+            if (mqinp?.innerFields?.length == map.length) {
+              for (var i=0;i<map.length;i++) { 
+                if (mqinp.innerFields[i].__controller.container == target) {
+                  var qnref = map[i];
+                  $('#qn'+qnref).val(fromMQwText(mqinp.innerFields[i].latex())).trigger('input');
+                  imathasAssess.syntaxCheckMQ('qn'+qnref);
+                }
+              }
+            }
+          };
+        mqinp.innerFields[i].config(thisconf);
+        var m;
+        if ((m = el.className.match(/(ansred|ansyel|ansgrn|ansorg)/)) !== null) {
+          $(mqinp.innerFields[i].__controller.container).addClass(m[0]);
+        }
+        mqinp.innerFields[i].__controller.container.setAttribute('id', 'mqinner-qn'+qnref);
+        var w = parseInt(el.style.width ?? 0);
+        mqinp.innerFields[i].__controller.container.style.minWidth = ((w > 6 || w == 0)?6:w)+'ch';
+        MQeditor.attachEditor(mqinp.innerFields[i].__controller.container);
+      }
+      for (var i=0;i<origmap.length;i++) {
+        var qnref = origmap[i];
+        // move keys
+        var keysrc = $("#qn"+qnref+",#mqinput-qn"+qnref).first();
+        var keywrap = keysrc.next(".keywrap");
+        if (keywrap.length == 0) {
+          keywrap = keysrc.next().next(".keywrap");
+        }
+        if (keywrap.length > 0) {
+          $("#mqinner-qn"+qnref+",.mqinnerref"+qnref).after(keywrap);
+        }
+      }
+    });
+  } else {
+    $(baseel).find(".mqinnerfillin > .mqfillin-alt").show();
+    $(baseel).find(".mqinnerfillin > .mqfillin-mq").hide();
+    $(baseel).find(".mq-editable-field[id^=mqinner-qn],.mqfillin-mq .mqinnerboxed").each(function(i,el) {
+      var qnref;
+      if ($(el).hasClass("mqinnerboxed")) {
+        qnref = el.className.match(/mqinnerref(\d+)/)?.[1];
+      } else {
+        qnref = el.id.substring(10);
+      }
+      if ($(el).next().hasClass("keywrap")) {
+        var key = $(el).next();
+        if ($("#mqinput-qn"+qnref).length > 0) {
+          $("#mqinput-qn"+qnref).after(key);
+        } else {
+          $("#qn"+qnref).after(key);
+        }
+      }
+    });
+  }
 }
 
 function setupDraw(qn) {
@@ -993,10 +1118,16 @@ function showSyntaxCheckMQ(qn) {
         rendermathnode(previewel);
     }
   }
+  if ($('#qn'+qn).closest('.mqinnerfillin').length > 0) {
+    var wrapper = $('#qn'+qn).closest('.mqinnerfillin');
+    if (!wrapper.find('.mqfillin-alt').is(':visible')) {
+      wrapper.find('.mqfillin-err').empty().append(wrapper.find('.mqfillin-alt .noticetext'));
+    }
+  }
   if (document.getElementById("qn"+qn)) {
     var MQ = MathQuill.getInterface(MathQuill.getInterface.MAX);
     var mqel = document.getElementById("mqinput-qn"+qn);
-    if (mqel.className.indexOf('disabled') == -1) {
+    if (mqel && mqel.className.indexOf('disabled') == -1) {
       var mf = MQ.MathField(mqel);
       mf.setAriaPostLabel(outerr, 5);
     }
@@ -1255,7 +1386,9 @@ function AMnumfuncPrepVar(qn,str) {
 		  if (greekletters.indexOf(vars[i].toLowerCase())!=-1) {
 			  isgreek = true;
 		  }
-		  if (vars[i].match(/^\w+_\w+$/)) {
+		  if (vars[i].slice(-1)=="'" && greekletters.indexOf(vars[i].toLowerCase().slice(0,-1))!=-1) {
+        // leave alone
+      } else if (vars[i].match(/^\w+_\w+$/)) {
 		  	if (!foundaltcap[i]) {
 		  		regmod = "gi";
 		  	} else {
@@ -1615,6 +1748,7 @@ function processCalcNtuple(qn, fullstr, format, qtype) {
   if (!fullstr.charAt(0).match(/[\(\[\<\{]/)) {
     notationok=false;
   }
+  var componentcnt = 0;
   for (var i=0; i<fullstr.length; i++) {
     dec = false;
     if (NCdepth==0) {
@@ -1637,11 +1771,17 @@ function processCalcNtuple(qn, fullstr, format, qtype) {
       NCdepth--;
       dec = true;
     }
-
     if ((NCdepth==0 && dec) || (NCdepth==1 && fullstr.charAt(i)==',')) {
       sub = fullstr.substring(lastcut,i).replace(/^\s+/,'').replace(/\s+$/,'');
       if (sub == '') {notationok = false;}
-      if (qtype.match(/complex/)) {
+      componentcnt++;
+      if (NCdepth==0 && dec) {
+        if (allParams[qn].ntupledim && allParams[qn].ntupledim != componentcnt) {
+          err += allParams[qn].dimwarn+'. ';
+        }
+        componentcnt = 0;
+      }
+      if (qtype.match(/complex/) && !sub.match(/^\s*-?oo\s*$/)) {
         res = evalcheckcomplex(sub, format);
         err += res.err;
         outcalceddisp += res.outstrdisp;
@@ -2355,6 +2495,9 @@ function singlevaleval(evalstr, format) {
   if (commasep) {
     evalstr = evalstr.replace(/(\d)\s*,\s*(?=\d{3}\b)/g,"$1");
   }
+  if (evalstr.match(/^\s*-?oo\s*$/)) {
+    return [evalstr, ''];
+  }
   if (evalstr.match(/,/)) {
     return [NaN, _("syntax incomplete")+". "];
   }
@@ -2394,7 +2537,8 @@ return {
   clearLivePreviewTimeouts: clearLivePreviewTimeouts,
   syntaxCheckMQ: syntaxCheckMQ,
   clearTips: clearTips,
-  handleMQenter: handleMQenter
+  handleMQenter: handleMQenter,
+  toggleMQfillins: toggleMQfillins
 };
 
 }(jQuery));

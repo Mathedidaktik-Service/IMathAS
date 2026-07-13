@@ -3,6 +3,7 @@ var AsciisvgDialog = {
 	height: 200,
 	alignm: "middle",
 	sscr: "",
+	alt: "Graph",
 	isnew: null,
 	AScgiloc: null,
 
@@ -18,6 +19,7 @@ var AsciisvgDialog = {
 		this.sscr = params.get('sscr');//window.parent.tinymce.activeEditor.windowManager.getParams().sscr;
 		this.AScgiloc = params.get('AScgiloc');//window.parent.tinymce.activeEditor.windowManager.getParams().AScgiloc;
 		this.alignm = params.get('alignm');//window.parent.tinymce.activeEditor.windowManager.getParams().alignm;
+		this.alt = params.get('alt');
 		if (ASnoSVG) {
 			document.getElementById("preview").style.display = 'none';
 			let previewimg = document.getElementById("previewimg");
@@ -29,6 +31,7 @@ var AsciisvgDialog = {
 			document.getElementById("previewsvg").setAttribute("sscr",this.sscr);
 		}
 		this.getsscr(this.sscr);
+		document.getElementById("alt").value = this.alt;
 		window.addEventListener('message', function (event) {
 			if (event.origin !== window.location.origin) {
 				console.warn("Blocked message from unexpected origin:", event.origin);
@@ -43,13 +46,14 @@ var AsciisvgDialog = {
 	insert : function() {
 		var ed = window.parent.tinymce.activeEditor;
 		// Insert the contents from the input into the document
+		this.alt = document.getElementById("alt").value;
 		if (this.isnew) {
 			if (this.alignm == "left" || this.alignm == "right") {
 				aligntxt = "vertical-align: middle; float: "+this.alignm+";";
 			} else {
 				aligntxt = "vertical-align: "+this.alignm+"; float: none;";
 			}
-			window.parent.tinymce.activeEditor.execCommand('mceInsertContent', false, '<img style="width:'+this.width+'px; height:'+this.height+'px; '+aligntxt+'" src="'+ this.AScgiloc + '?sscr='+encodeURIComponent(this.sscr)+'" data-sscr="'+this.sscr+'" data-asciisvg="1" data-mce-placeholder="1" script=" " alt="Graph" />');
+			window.parent.tinymce.activeEditor.execCommand('mceInsertContent', false, '<img style="width:'+this.width+'px; height:'+this.height+'px; '+aligntxt+'" src="'+ this.AScgiloc + '?sscr='+encodeURIComponent(this.sscr)+'" data-sscr="'+this.sscr+'" data-asciisvg="1" data-mce-placeholder="1" script=" " alt="'+this.escapeHtml(this.alt)+'" />');
 		} else {
 			el = window.parent.tinymce.activeEditor.selection.getNode();
 			ed.dom.setAttrib(el,"sscr",this.sscr);
@@ -57,6 +61,7 @@ var AsciisvgDialog = {
 			ed.dom.setAttrib(el,"src",this.AScgiloc + '?sscr='+encodeURIComponent(this.sscr));
 			ed.dom.setAttrib(el,"width",this.width);
 			ed.dom.setAttrib(el,"height",this.height);
+			ed.dom.setAttrib(el,"alt",this.alt);
 			ed.dom.setStyle(el,"width",this.width + 'px');
 			ed.dom.setStyle(el,"height",this.height + 'px');
 			if (this.alignm == "left" || this.alignm == "right") {
@@ -91,7 +96,8 @@ var AsciisvgDialog = {
 			newopt.text = 'dy/dx='+eq1;
 			eq2= document.getElementById("eqn2").value;
 		} else if (type == "label") {
-			newopt.text = 'label='+eq1;
+			eq1 = eq1.replace(/,/g, '&x44;').replace(/"/g, '&quot;');
+			newopt.text = 'label='+eq1.replace(/&(amp;)?x44;/g, ',').replace(/&(amp;)?quot;/g, '"');
 		}
 
 
@@ -282,7 +288,7 @@ var AsciisvgDialog = {
 			document.getElementById("eqntype").selectedIndex = 4;
 		}
 		this.changetype();
-		document.getElementById("equation").value = sa[1];
+		document.getElementById("equation").value = sa[1].replace(/&(amp;)?x44;/g, ',').replace(/&(amp;)?quot;/g, '"');
 		if ((sa[0] == "param")||(sa[0] == "slope")) {
 			document.getElementById("eqn2").value = sa[2];
 		}
@@ -349,7 +355,8 @@ var AsciisvgDialog = {
 			} else if (sa[inx] == "slope") {
 				newopt.text = 'dy/dx='+ sa[inx+1];
 			} else if (sa[inx] == "label") {
-				newopt.text = 'label='+ sa[inx+1];
+				sa[inx+1] = sa[inx+1].replace(/,/g, '&x44;').replace(/"/g, '&quot;');
+				newopt.text = 'label='+ sa[inx+1].replace(/&(amp;)?x44;/g, ',').replace(/&(amp;)?quot;/g, '"');
 			}
 			newopt.value = sa[inx]+','+sa[inx+1]+','+sa[inx+2]+','+sa[inx+3]+','+sa[inx+4]+','+sa[inx+5]+','+sa[inx+6]+','+sa[inx+7]+','+sa[inx+8]+','+sa[inx+9];
 			graphs = document.getElementById("graphs");
@@ -377,6 +384,15 @@ var AsciisvgDialog = {
 	{
 		var cnode = document.getElementById(tag);
 		cnode.replaceChild(document.createTextNode(text),cnode.lastChild);
+	},
+
+	escapeHtml : function (str) {
+		return str
+			.replace(/&/g, '&amp;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#39;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;');
 	}
 
 };

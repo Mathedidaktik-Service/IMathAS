@@ -1,6 +1,7 @@
 <?php
 require_once "../includes/filehandler.php";
 require_once "../includes/TeacherAuditLog.php";
+require_once "../includes/reqscorefuncs.php";
 
 //Look to see if a hook file is defined, and include if it is
 if (isset($CFG['hooks']['delete'])) {
@@ -11,7 +12,7 @@ function delitembyid($itemid) {
 	global $DBH, $cid;
 	$stm = $DBH->prepare("SELECT itemtype,typeid FROM imas_items WHERE id=:id AND courseid=:courseid");
 	$stm->execute(array(':id'=>$itemid, ':courseid'=>$cid));
-	list($itemtype,$typeid) = $stm->fetch(PDO::FETCH_NUM);
+	list($itemtype,$typeid) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
 	if (empty($itemtype)) {
 		echo 'Invalid ID';
 		exit;
@@ -56,14 +57,14 @@ function delitembyid($itemid) {
 		$stm->execute(array(':id'=>$typeid));
 		list($itemname,$text,$points,$fileid) = $stm->fetch(PDO::FETCH_NUM);
 		TeacherAuditLog::addTracking(
-      $cid,
-      "Delete Item",
-      $typeid,
-      array(
-        'item_type'=>$itemtype,
-        'item_name'=>$itemname
-      )
-    );
+			$cid,
+			"Delete Item",
+			$typeid,
+			array(
+				'item_type'=>$itemtype,
+				'item_name'=>$itemname
+			)
+		);
 		if ($fileid > 0) { // has file id - can use that approach
 			$stm = $DBH->prepare("SELECT count(id) FROM imas_linkedtext WHERE fileid=?");
 			$stm->execute(array($fileid));
@@ -180,8 +181,14 @@ function delitembyid($itemid) {
 		$stm = $DBH->prepare("DELETE FROM imas_livepoll_status WHERE assessmentid=:assessmentid");
 		$stm->execute(array(':assessmentid'=>$typeid));
 
-		$stm = $DBH->prepare("UPDATE imas_assessments SET reqscoreaid=0 WHERE reqscoreaid=:assessmentid AND courseid=:courseid");
-        $stm->execute(array(':assessmentid'=>$typeid, ':courseid'=>$cid));
+		$stm = $DBH->prepare("SELECT id,reqscorejson FROM imas_assessments WHERE courseid=? AND (reqscorejson LIKE ? OR reqscorejson LIKE ?)");
+		$stm->execute([$cid, '%['.$typeid.',%', '%["'.$typeid.'",%']);
+		$stm2 = $DBH->prepare("UPDATE imas_assessments SET reqscorejson=? WHERE id=?");
+		while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
+			$newarr = removeAidFromReqscore(json_decode($row['reqscorejson'], true), $typeid);
+			$newjson = ($newarr===null ? '' : json_encode($newarr));
+			$stm2->execute([$newjson, $row['id']]);
+		}
         
         $stm = $DBH->prepare("DELETE FROM imas_lti_placements WHERE typeid=:assessmentid AND placementtype='assess'");
 		$stm->execute(array(':assessmentid'=>$typeid));

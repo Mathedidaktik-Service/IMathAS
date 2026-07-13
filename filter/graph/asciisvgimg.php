@@ -154,6 +154,7 @@ function processShortScript($script) {
 			if ($sa[$inx]=='slope') {
 				$this->ASslopefield(array($sa[$inx+1],$sa[$inx+2],$sa[$inx+2]));
 			} else if ($sa[$inx]=='label') {
+				$sa[$inx+1] = str_replace(['&amp;x44;', '&x44;', '&amp;quot;', '&quot;'], [',', ',', '"', '"'], $sa[$inx+1]);
 				$this->AStext(array($sa[$inx+5].','.$sa[$inx+6],$sa[$inx+1]));
 			} else {
 				if ($sa[$inx]=='func') {
@@ -174,6 +175,49 @@ function processShortScript($script) {
 	}
 }
 
+function commasToSemicolons($input) {
+    $result = '';
+    $depth = 0;          // parenthesis/bracket nesting depth
+    $inString = false;
+    $stringChar = '';    // which quote started the string (' or ")
+    $len = strlen($input);
+
+    for ($i = 0; $i < $len; $i++) {
+        $char = $input[$i];
+
+        if ($inString) {
+            $result .= $char;
+            // Handle escaped characters (e.g. \' or \")
+            if ($char === '\\') {
+                // Consume the next character as-is
+                if ($i + 1 < $len) {
+                    $result .= $input[++$i];
+                }
+            } elseif ($char === $stringChar) {
+                $inString = false;
+            }
+        } else {
+            if ($char === '"' || $char === "'") {
+                $inString = true;
+                $stringChar = $char;
+                $result .= $char;
+            } elseif ($char === '(' || $char === '[' || $char === '{') {
+                $depth++;
+                $result .= $char;
+            } elseif ($char === ')' || $char === ']' || $char === '}') {
+                $depth--;
+                $result .= $char;
+            } elseif ($char === ',' && $depth === 0) {
+                $result .= ';';  // <-- the key substitution
+            } else {
+                $result .= $char;
+            }
+        }
+    }
+
+    return $result;
+}
+
 function processScript($script) {
 	//$xmin = -5; $xmax = 5; $ymin = -5; $ymax = 5; $border = 5;
 	//$stroke = 'black'; $fill = 'none'; $curdash=''; $isdashed=false; $marker='none';
@@ -181,7 +225,7 @@ function processScript($script) {
 	//$strokewidth = 1; $dotradius=8; $ticklength=4; $fontfill = ''; $fontsize = 12;
 	//$script = preg_replace('/&[^\s]*;
 	$script = html_entity_decode($script, ENT_COMPAT, 'UTF-8');
-	$this->AScom =  explode(';',$script);
+	$this->AScom =  explode(';', $this->commasToSemicolons($script));
 	foreach ($this->AScom as $com) {
 		if (preg_match('/\s*(\w+)\s*=(.+)/',$com,$matches)) { //is assignment operator
 			$matches[2] = trim(str_replace(array('"','\''),'',$matches[2]));
@@ -233,6 +277,10 @@ function processScript($script) {
 					$this->ASinitPicture($argarr);
 					break;
 				case 'setBorder':
+					//(left,bottom,right,top)
+					if (count($argarr) < 4) {
+						$argarr = [$argarr[0],$argarr[0],$argarr[0],$argarr[0]];
+					}
 					$this->border = $argarr;
 					break;
 				case 'axes':
@@ -255,6 +303,9 @@ function processScript($script) {
 					break;
 				case 'text':
 					$this->AStext($argarr);
+					break;
+				case 'textfrac':
+					$this->AStextfrac($argarr);
 					break;
 				case 'textabs':
 					$this->AStextAbs($argarr);
@@ -375,6 +426,16 @@ function AStext($arg) {
 	}
 	$this->AStextInternal($p,$st,$pos,$angle);
 }
+
+function AStextfrac($arg) {
+	if (!$this->isinit) {$this->ASinitPicture();}
+	$d = array_splice($arg,2,1);
+	if ($d[0] != 1) {
+		$arg[1] .= '/' . $d[0];
+	}
+	$this->AStext($arg);
+}
+
 function AStextAbs($arg) {
 	if (!$this->isinit) {$this->ASinitPicture();}
 	$pos = '';  $angle = 0;
@@ -628,12 +689,12 @@ function ASaxes($arg) {
 			$dosmallticks = true;
 		}
 	}
-	if ($xscl<0) {
+	/*if ($xscl<0) {
 		$xscl *= -1;
 	}
 	if ($yscl<0) {
 		$yscl *= -1;
-	}
+	}*/
 	if ($xgrid<0) {
 		$xgrid *= -1;
 	}
@@ -651,11 +712,11 @@ function ASaxes($arg) {
 		$yscl *= $this->yunitlength;
 	}
 	if (!$doy) {
-		$this->fontsize = min($xscl/2,12);
+		$this->fontsize = min(abs($xscl)/2,12);
 	} else if (!$dox) {
-		$this->fontsize = min($yscl/2,12);
+		$this->fontsize = min(abs($yscl)/2,12);
 	} else {
-		$this->fontsize = min($xscl/2,$yscl/2,12);
+		$this->fontsize = min(abs($xscl)/2,abs($yscl)/2,12);
 	}
 	$this->ticklength = max($this->fontsize/4,4);
 	if ($this->usegd2) {
@@ -743,37 +804,41 @@ function ASaxes($arg) {
 	}
 
 	$ac = $this->axescolor;
-	if ($doy && $yscl>0) {
+	if ($doy) {
 		if ($this->origin[0]>=$this->winxmin && $this->origin[0]<=$this->winxmax) {
 			imageline($this->img, (int) round($this->origin[0]), (int) round($this->winymin), (int) round($this->origin[0]), (int) round(($fqonlyy?$this->height-$this->origin[1]:$this->winymax)), $this->colors[$ac]);
-			//ticks
-			if (!$fqonlyy) {
-				for ($y=$this->height - $this->origin[1]; $y<=$this->winymax; $y += $yscl) {
-					if ($y>=$this->winymin) {
+			if ($yscl>0) {
+				//ticks
+				if (!$fqonlyy) {
+					for ($y=$this->height - $this->origin[1]; $y<=$this->winymax; $y += $yscl) {
+						if ($y>=$this->winymin) {
+							imageline($this->img, (int) round($this->origin[0]-$this->ticklength), (int) round($y), (int) round($this->origin[0]+$this->ticklength), (int) round($y), $this->colors[$ac]);
+						}
+					}
+				}
+				for ($y=$this->height - $this->origin[1]-$yscl; $y>=$this->winymin; $y -= $yscl) {
+					if ($y<=$this->winymax) {
 						imageline($this->img, (int) round($this->origin[0]-$this->ticklength), (int) round($y), (int) round($this->origin[0]+$this->ticklength), (int) round($y), $this->colors[$ac]);
 					}
 				}
 			}
-			for ($y=$this->height - $this->origin[1]-$yscl; $y>=$this->winymin; $y -= $yscl) {
-				if ($y<=$this->winymax) {
-					imageline($this->img, (int) round($this->origin[0]-$this->ticklength), (int) round($y), (int) round($this->origin[0]+$this->ticklength), (int) round($y), $this->colors[$ac]);
-				}
-			}
 		}
 	}
-	if ($dox && $xscl>0) {
+	if ($dox) {
 		if ($this->origin[1]>=$this->winymin && $this->origin[1]<=$this->winymax) {
 			imageline($this->img, (int) round(($fqonlyx?$this->origin[0]:$this->winxmin)), (int) round($this->height-$this->origin[1]), (int) round($this->winxmax), (int) round($this->height-$this->origin[1]), $this->colors[$ac]);
-			//ticks
-			for ($x=$this->origin[0]; $x<=$this->winxmax; $x += $xscl) {
-				if ($x>=$this->winxmin) {
-					imageline($this->img, (int) round($x), (int) round($this->height- $this->origin[1] -$this->ticklength), (int) round($x), (int) round($this->height- $this->origin[1] +$this->ticklength), $this->colors[$ac]);
+			if ($xscl>0) {
+				//ticks
+				for ($x=$this->origin[0]; $x<=$this->winxmax; $x += $xscl) {
+					if ($x>=$this->winxmin) {
+						imageline($this->img, (int) round($x), (int) round($this->height- $this->origin[1] -$this->ticklength), (int) round($x), (int) round($this->height- $this->origin[1] +$this->ticklength), $this->colors[$ac]);
+					}
 				}
-			}
-			if (!$fqonlyx) {
-				for ($x=$this->origin[0]-$xscl; $x>=$this->winxmin; $x -= $xscl) {
-					if ($x<=$this->winxmax) {
-						imageline($this->img, (int) round($x), (int) round($this->height-$this->origin[1]-$this->ticklength), (int) round($x), (int) round($this->height-$this->origin[1]+$this->ticklength), $this->colors[$ac]);
+				if (!$fqonlyx) {
+					for ($x=$this->origin[0]-$xscl; $x>=$this->winxmin; $x -= $xscl) {
+						if ($x<=$this->winxmax) {
+							imageline($this->img, (int) round($x), (int) round($this->height-$this->origin[1]-$this->ticklength), (int) round($x), (int) round($this->height-$this->origin[1]+$this->ticklength), $this->colors[$ac]);
+						}
 					}
 				}
 			}
@@ -1178,8 +1243,8 @@ function ASplot($function) {
 	}
 	$xmin += ($xmax - $xmin)/100000; //avoid divide by zero errors
 	if (isset($function[3]) && $function[3]!='' && $function[3]!='null') {
-		$dx = ($xmax - $xmin)/($function[3]-1);
-		$stopat = $function[3];
+		$stopat = $this->evalifneeded($function[3]);
+		$dx = ($xmax - $xmin)/($stopat-1);
 	} else {
 		$dx = ($xmax - $xmin)/100;
 		$stopat = 101;

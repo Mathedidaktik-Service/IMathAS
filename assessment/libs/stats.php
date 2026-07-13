@@ -12,7 +12,8 @@ array_push($allowedmacros,"nCr","nPr","mean","stdev","variance","absmeandev","pe
  "csvdownloadlink","modes","forceonemode","dotplot","gamma_cdf","gamma_inv","beta_cdf","beta_inv",
  "anova1way_f","anova1way","anova2way","anova_table","anova2way_f","student_t",
  "stats_randg","stats_randF","stats_randchi2","stats_randt","stats_randpoisson","cluster_bargraph",
- "stem_plot","poissonpdf","poissoncdf","gamma_log");
+ "stem_plot","poissonpdf","poissoncdf","gamma_log","geometricdf","geometripdf","negbinomialpdf",
+ "negbinomialcdf","hypgeomcdf","hypgeompdf");
 
 //nCr(n,r)
 //The Choose function
@@ -923,17 +924,27 @@ function normrand($mu,$sig,$n,$rnd=null,$pos=false,$skew=0) {
 			$r = $a*$a+$b*$b;
 		} while ($r==0||$r>1);
         $r = sqrt(-2*log($r)/$r);
-        $v1 = $sig*$a*$r + $mu;
-        $v2 = $sig*$b*$r + $mu;
+		$u1 = $a * $r;
+		$u2 = $b * $r;
         if ($skew != 0) {
-            $v3 = $d*$v1 + $d2*$v2;
-            $v3 = $v1 >=0 ? $v3 : -$v3;
-            if (!$pos || $v3 > 0) {
-                $z[] = round($v3, $rnd);
-            }
-            $icnt += 0.5;
-            continue;
+             // Apply skew-normal transform on standard normals, THEN scale/shift
+			$v3 = $d * $u1 + $d2 * $u2;
+			$v3 = ($u1 >= 0 ? $v3 : -$v3) * $sig + $mu;  // sign check on raw u1
+			if (!$pos || $v3 > 0) {
+				$z[] = ($rnd === null) ? $v3 : round($v3, $rnd);
+			}
+
+			$v4 = $d * $u2 + $d2 * $u1;
+			$v4 = ($u2 >= 0 ? $v4 : -$v4) * $sig + $mu;  // use both values
+			if (!$pos || $v4 > 0) {
+				$z[] = ($rnd === null) ? $v4 : round($v4, $rnd);
+			}
+
+			$icnt++;
+			continue;
         }
+		$v1 = $sig * $u1 + $mu;
+		$v2 = $sig * $u2 + $mu;
         if (!$pos || $v1 > 0) {
             $z[] = ($rnd===null) ? $v1 : round($v1, $rnd);
         }
@@ -1693,6 +1704,136 @@ function binomialcdf($N,$p,$x) {
     $out = 1 - beta_cdf($z, $a, $b);
 
 	return $out;
+}
+
+// negbinomialpdf(k, r, p)
+// probability of exactly k failures before the r'th success
+// probability of success p
+function negbinomialpdf($k, $r, $p) {
+	if (!is_nicenumber($p) || !is_nicenumber($k) || !is_nicenumber($r) || 
+		$p<0 || $p>1 || $k < 0 || $r < 1) {
+		echo 'invalid inputs to negbinomialpdf';
+		return 0;
+	}
+	return $r/($k + $r) * binomialpdf($k+$r, $p, $r);
+}
+
+// negbinomialcdf(k, r, p)
+// probability there were at most k failures before the r'th success
+// probability of success p
+function negbinomialcdf($k, $r, $p) {
+	if (!is_nicenumber($p) || !is_nicenumber($k) || !is_nicenumber($r) || 
+		$p<0 || $p>1 || $k < 0 || $r < 1) {
+		echo 'invalid inputs to negbinomialcdf';
+		return 0;
+	}
+	return 1 - binomialcdf($k+$r, $p, $r - 1);
+}
+
+function geometricpdf($k, $p) {
+	if (!is_nicenumber($p) || !is_nicenumber($k) || $p<0 || $p>1 || $k < 0) {
+		echo 'invalid inputs to geometricpdf';
+		return 0;
+	}
+    // P(exactly k failures before the 1st success)
+    return $p * pow(1 - $p, $k);
+}
+
+function geometriccdf($k, $p) {
+    // P(at most k failures before the 1st success)
+	if (!is_nicenumber($p) || !is_nicenumber($k) || $p<0 || $p>1 || $k < 0) {
+		echo 'invalid inputs to geometriccdf';
+		return 0;
+	}
+    return 1 - pow(1 - $p, $k + 1);
+}
+
+function hypgeompdf($k, $N, $m, $n) {
+    // Hypergeometric PDF.
+    // k = number of successes drawn
+    // N = population size
+    // m = number of successes in population
+    // n = number of items drawn from population
+
+    if ($k !== (int)$k) {
+        return false;
+    } elseif ($k < 0 || $k < $m - ($N - $n)) {
+        return 0;
+    } elseif ($k > $n || $k > $m) {
+        return 0;
+    } elseif ($m * 2 > $N) {
+        if ($n * 2 > $N) {
+            return hypgeompdf($N - $m - $n + $k, $N, $N - $m, $N - $n);
+        } else {
+            return hypgeompdf($n - $k, $N, $N - $m, $n);
+        }
+    } elseif ($n * 2 > $N) {
+        return hypgeompdf($m - $k, $N, $m, $N - $n);
+    } elseif ($m < $n) {
+        return hypgeompdf($k, $N, $n, $m);
+    } else {
+        $scaledPDF = 1;
+        $samplesDone = 0;
+
+        for ($i = 0; $i < $k; $i++) {
+            while ($scaledPDF > 1 && $samplesDone < $n) {
+                $scaledPDF *= 1 - ($m / ($N - $samplesDone));
+                $samplesDone++;
+            }
+            $scaledPDF *= ($n - $i) * ($m - $i) / (($i + 1) * ($N - $m - $n + $i + 1));
+        }
+
+        for (; $samplesDone < $n; $samplesDone++) {
+            $scaledPDF *= 1 - ($m / ($N - $samplesDone));
+        }
+
+        return min(1, max(0, $scaledPDF));
+    }
+}
+
+function hypgeomcdf($x, $N, $m, $n) {
+    // Hypergeometric CDF.
+    // x = number of successes drawn
+    // N = population size
+    // m = number of successes in population
+    // n = number of items drawn from population
+
+    if ($x < 0 || $x < $m - ($N - $n)) {
+        return 0;
+    } elseif ($x >= $n || $x >= $m) {
+        return 1;
+    } elseif ($m * 2 > $N) {
+        if ($n * 2 > $N) {
+            return hypgeomcdf($N - $m - $n + $x, $N, $N - $m, $N - $n);
+        } else {
+            return 1 - hypgeomcdf($n - $x - 1, $N, $N - $m, $n);
+        }
+    } elseif ($n * 2 > $N) {
+        return 1 - hypgeomcdf($m - $x - 1, $N, $m, $N - $n);
+    } elseif ($m < $n) {
+        return hypgeomcdf($x, $N, $n, $m);
+    } else {
+        $scaledCDF = 1;
+        $scaledPDF = 1;
+        $samplesDone = 0;
+
+        for ($i = 0; $i < $x; $i++) {
+            while ($scaledCDF > 1 && $samplesDone < $n) {
+                $factor = 1 - ($m / ($N - $samplesDone));
+                $scaledPDF *= $factor;
+                $scaledCDF *= $factor;
+                $samplesDone++;
+            }
+            $scaledPDF *= ($n - $i) * ($m - $i) / (($i + 1) * ($N - $m - $n + $i + 1));
+            $scaledCDF += $scaledPDF;
+        }
+
+        for (; $samplesDone < $n; $samplesDone++) {
+            $scaledCDF *= 1 - ($m / ($N - $samplesDone));
+        }
+
+        return min(1, max(0, $scaledCDF));
+    }
 }
 
 //chi2teststat(m)

@@ -32,8 +32,8 @@ if (isset($_GET['libtree']) && $_GET['libtree']=="popup") {
     } else if ($myrights<20) {
         exit;
     }
-    $placeinhead = '<script src="'.$staticroot.'/javascript/accessibletree.js?v=111725"></script>';
-    $placeinhead .= '<link rel="stylesheet" href="'.$staticroot.'/javascript/accessibletree.css?v=070625" type="text/css" />';
+    $placeinhead = '<script src="'.$staticroot.'/javascript/accessibletree.js?v=041726"></script>';
+    $placeinhead .= '<link rel="stylesheet" href="'.$staticroot.'/javascript/accessibletree.css?v=071126" type="text/css" />';
     $noskipnavlink = true;
     $hideAllHeaderNav = true;
     $flexwidth = true;
@@ -50,11 +50,20 @@ else if (isset($_GET['getsubs']) && isset($_GET['cid']) && $_GET['cid']=="admin"
     $isadmin = true;
     $cid = 'admin';
     $includecounts = !empty($_GET['counts']);
+    $showmanagelibslinks = !empty($_GET['links']);
     
     $parent = Sanitize::onlyInt($_GET['getsubs']);
-    if ($parent > 0) {
+    if ($parent > 0 || $_GET['type'] == 'grouproot' || $_GET['type'] == 'privateroot') {
+        $qarr = [$parent];
         $query = "SELECT imas_libraries.id,imas_libraries.name,imas_libraries.parent,imas_libraries.ownerid,imas_libraries.userights,imas_libraries.sortorder,imas_libraries.groupid,imas_libraries.federationlevel,COUNT(imas_library_items.id) AS count ";
         $query .= "FROM imas_libraries LEFT JOIN imas_library_items ON imas_library_items.libid=imas_libraries.id AND imas_library_items.deleted=0 WHERE imas_libraries.deleted=0 AND imas_libraries.parent=? ";
+        if (isset($_GET['type']) && $_GET['type'] == 'grouproot') {
+            $query .= 'AND imas_libraries.userights > 0 AND imas_libraries.userights < 4 AND imas_libraries.groupid<>? ';
+            $qarr[] = $groupid;
+        } else if (isset($_GET['type']) && $_GET['type'] == 'privateroot') {
+            $query .= 'AND imas_libraries.userights = 0 AND imas_libraries.ownerid<>? ';
+            $qarr[] = $userid;
+        }
         $query .= 'GROUP BY imas_libraries.id ';
         if (!empty($_GET['sortorder'])) {
             $query .= " ORDER BY imas_libraries.name";
@@ -62,7 +71,7 @@ else if (isset($_GET['getsubs']) && isset($_GET['cid']) && $_GET['cid']=="admin"
             $query .= " ORDER BY imas_libraries.id";
         }
         $stm = $DBH->prepare($query);
-        $stm->execute([$parent]);
+        $stm->execute($qarr);
         $out = [];
         $locked = [];
         $checked = [];
@@ -79,7 +88,7 @@ else if (isset($_GET['getsubs']) && isset($_GET['cid']) && $_GET['cid']=="admin"
         $stm->execute($ids);
         while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
             if ($row['count']>0) {
-                $out[$row['id']]['childrenUrl'] = "libtree3.php?cid=$cid&getsubs=".$row['id']."&sortorder=".intval($row['sortorder']).($includecounts? '&counts=true':'');
+                $out[$row['id']]['childrenUrl'] = $imasroot . "/course/libtree3.php?cid=$cid&getsubs=".$row['id']."&sortorder=".intval($row['sortorder']).($includecounts? '&counts=true':'').($showmanagelibslinks?'&links=1':'');
             }
         }
         if (!empty($_GET['sortorder'])) {
@@ -138,10 +147,19 @@ $checked = array_merge($checked,$locked);
 
 // Get info on ALL libraries we have access to
 $query = "SELECT imas_libraries.id,imas_libraries.name,imas_libraries.parent,imas_libraries.ownerid,imas_libraries.userights,imas_libraries.sortorder,imas_libraries.groupid,imas_libraries.federationlevel,COUNT(imas_library_items.id) AS count ";
+if ($isadmin) {
+    $query .= ',EXISTS (
+        SELECT 1 FROM imas_libraries AS children
+        WHERE children.parent = imas_libraries.id
+        AND children.deleted = 0
+    ) AS has_children ';
+}
 $query .= "FROM imas_libraries LEFT JOIN imas_library_items ON imas_library_items.libid=imas_libraries.id AND imas_library_items.deleted=0 WHERE imas_libraries.deleted=0 ";
 $qarr = array();
 if ($isadmin) {
-    //no filter
+    //any group owned library or visible to all or sublibraries
+    $query .= "AND (imas_libraries.groupid=:groupid OR imas_libraries.userights>2) AND imas_libraries.parent=0 ";
+    $qarr[':groupid'] = $groupid;
 } else if ($isgrpadmin) {
     //any group owned library or visible to all
     $query .= "AND (imas_libraries.groupid=:groupid OR imas_libraries.userights>2) ";
@@ -174,8 +192,14 @@ while ($line = $stm->fetch(PDO::FETCH_ASSOC)) {
 }
 
 //if parent has lower userights, up them to match child library
-function setparentrights($alibid) {
+function setparentrights($alibid, &$visited = []) {
     global $rights,$libdata;
+    if (isset($visited[$alibid])) {
+        error_log("Circular reference detected in libtree3 setparentrights at node: $alibid");
+        return;
+    }
+    $visited[$alibid] = true;
+
     if (!empty($libdata[$alibid]['parent'])) {
         $parent = $libdata[$alibid]['parent'];
         if (!isset($libdata[$parent])) {
@@ -184,7 +208,7 @@ function setparentrights($alibid) {
         if ($libdata[$parent]['userights'] < $libdata[$alibid]['userights']) {
             $libdata[$parent]['userights'] = $libdata[$alibid]['userights'];
         }
-        setparentrights($parent);
+        setparentrights($parent, $visited);
     }
 }
 foreach ($libdata as $k=>$n) {
@@ -192,7 +216,7 @@ foreach ($libdata as $k=>$n) {
 }
 
 function genItem($data) {
-    global $isadmin, $isgrpadmin, $userid, $groupid, $cid;
+    global $isadmin, $isgrpadmin, $userid, $groupid, $cid, $imasroot;
     global $childlibs, $locked, $checked, $showmanagelibslinks, $allsrights, $selectrights, $includecounts;
 
     $item = [];
@@ -216,7 +240,7 @@ function genItem($data) {
                 'href'=>'managelibs.php?cid='.$cid.'&modify='.$data['id']
             ];
         }
-        if (!empty($childlibs[$data['id']]) || $data['count'] === 0) {
+        if (!empty($childlibs[$data['id']]) || $data['count'] === 0 || !empty($data['has_children'])) {
             if (
                 $data['userights']>$allsrights || 
                 (($data['userights']%3)>$selectrights && $data['groupid']==$groupid) || 
@@ -258,11 +282,13 @@ function containsChecked($child) {
     return false;
 }
 
+$visited = [];
+
 // generate json for output
 // returns an array of data for the children of the given parent ID
 function getChildren($parent) {
     global $childlibs,$libdata,$allsrights,$selectrights,$userid,$groupid,$isadmin,$isgrpadmin;
-    global $locked, $checked, $cid, $includecounts;
+    global $locked, $checked, $cid, $includecounts, $visited, $showmanagelibslinks, $imasroot;
 
     $out = [];
     $children = $childlibs[$parent];
@@ -277,6 +303,11 @@ function getChildren($parent) {
         $children = array_keys($orderarr);
     }
     foreach ($children as $child) {
+        if (isset($visited[$child])) {
+            error_log("Circular reference in libtree3 detected for library: $child");
+            continue;
+        }
+        $visited[$child] = true;
         if (
             $libdata[$child]['userights']>$allsrights || 
             (($libdata[$child]['userights']%3)>$selectrights && $libdata[$child]['groupid']==$groupid) || 
@@ -293,13 +324,17 @@ function getChildren($parent) {
                 }
             }
             
-            if ($isadmin && $parent==0 && $rights<5 && 
+            if ($isadmin && $parent==0 && !empty($libdata[$child]['has_children'])) {
+                $item['childrenUrl'] = $imasroot . "/course/libtree3.php?cid=$cid&getsubs=".$child."&sortorder=".intval($libdata[$child]['sortorder']).($includecounts? '&counts=true':'').($showmanagelibslinks?'&links=1':'');
+                $out[] = $item;
+            } else if ($isadmin && $parent==0 && $rights<4 && 
                 $libdata[$child]['ownerid']!=$userid && 
                 ($rights==0 || $libdata[$child]['groupid']!=$groupid) &&
                 !containsChecked($child)
             ) {
+                // shouldn't be hitting this code block anymore, but keeping for backreference
                 if (!empty($childlibs[$child])) {
-                    $item['childrenUrl'] = "libtree3.php?cid=$cid&getsubs=".$child."&sortorder=".intval($libdata[$child]['sortorder']).($includecounts? '&counts=true':'');
+                    $item['childrenUrl'] = $imasroot . "/course/libtree3.php?cid=$cid&getsubs=".$child."&sortorder=".intval($libdata[$child]['sortorder']).($includecounts? '&counts=true':'').($showmanagelibslinks?'&links=1':'');
                 }
                 if ($rights==0) {
                     $toplevelprivate[] = $item;
@@ -314,37 +349,42 @@ function getChildren($parent) {
             }
         }
     }
-    if ($isadmin && $parent==0 && count($toplevelprivate)>0) {
+    if ($isadmin && $parent==0) {
         $out[] = [
             'id'=>"librlp",
             'label'=>_('Root Level Private Libraries'),
             'userights'=>0,
             'notselectable'=>true,
-            'children' => $toplevelprivate
+            'childrenUrl' => $imasroot . "/course/libtree3.php?cid=$cid&type=privateroot&getsubs=0&sortorder=".intval($libdata[$child]['sortorder']).($includecounts? '&counts=true':'').($showmanagelibslinks?'&links=1':'')
         ];
     }
-    if ($isadmin && $parent==0 && count($toplevelgroup)>0) {
+    if ($isadmin && $parent==0) {
         $out[] = [
             'id'=>"librlg",
             'label'=>_('Root Level Group Libraries'),
             'userights'=>2,
             'notselectable'=>true,
-            'children' => $toplevelgroup
+            'childrenUrl' => $imasroot . "/course/libtree3.php?cid=$cid&type=grouproot&getsubs=0&sortorder=".intval($libdata[$child]['sortorder']).($includecounts? '&counts=true':'').($showmanagelibslinks?'&links=1':'')
         ];
     }
     return $out;
 }
 
-$treearr = getChildren(0);
+if (empty($_GET['baselib'])) {
+    $treearr = getChildren(0);
+} else {
+    $treearr = getChildren(intval($_GET['baselib']));
+}
 if (!empty($addrootnode)) {
     $root = genItem(['id'=>'0','name'=>_('Root'),'userights'=>8,'federationlevel'=>0]);
     $root['expanded'] = true;
     $root['children'] = $treearr;
     $treearr = [$root];
-} else if (empty($hideunassigned)) {
+} else if (empty($hideunassigned) && empty($_GET['baselib'])) {
     // add unassigned
     array_unshift($treearr, genItem(['id'=>'0','name'=>_('Unassigned'),'userights'=>0,'federationlevel'=>0, 'ownerid'=>$userid, 'groupid'=>$groupid]));
 }
+
 if ($mode == 'multi') {
     echo '<div style="margin-bottom: 5px"><button type="button" onclick="treeWidget.unselectAll();">',_('Uncheck All'),'</button></div>';
 }

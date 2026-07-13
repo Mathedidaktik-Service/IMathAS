@@ -296,23 +296,18 @@ if (!(isset($teacherid))) {
 			$qarr[':reviewdate'] = isset($_POST['doreview'])?2000000000:0;
 		}
 		if (isset($_POST['chgreqscoreaid'])) {
-			$sets[] = "reqscore=:reqscore";
+			$sets[] = "reqscorejson=:reqscorejson";
 			if ($_POST['reqscoreaid'] > 0) {
-				$qarr[':reqscore'] = Sanitize::onlyInt($_POST['reqscore']);
+				$reqscore = Sanitize::onlyInt($_POST['reqscore']);
+				$reqscoreaid = Sanitize::onlyInt($_POST['reqscoreaid']);
+				$reqscorecalctype = ($_POST['reqscorecalctype']==1)?1:0;
+				$qarr[':reqscorejson'] = json_encode([$reqscoreaid, $reqscore, $reqscorecalctype]);
 			} else {
-				$qarr[':reqscore'] = 0;
-			}
-			$sets[] = "reqscoreaid=:reqscoreaid";
-			$qarr[':reqscoreaid'] = Sanitize::onlyInt($_POST['reqscoreaid']);
-			if ($_POST['reqscorecalctype']==1) {
-				$sets[] = "reqscoretype=(reqscoretype | 2)";
-			} else {
-				$sets[] = "reqscoretype=(reqscoretype & ~2)";
+				$qarr[':reqscorejson'] = '';
 			}
 		}
 		if (isset($_POST['chgreqscoretype'])) {
 			if ($_POST['reqscoretype']==0) {
-				$sets[] = 'reqscore=ABS(reqscore)';
 				$sets[] = 'reqscoretype=(reqscoretype & ~1)';
 			} else {
 				$sets[] = 'reqscoretype=(reqscoretype | 1)';
@@ -432,6 +427,8 @@ if (!(isset($teacherid))) {
 		$line['caltag'] = isset($CFG['AMS']['caltag'])?$CFG['AMS']['caltag']:'?';
 		$line['calrtag'] = isset($CFG['AMS']['calrtag'])?$CFG['AMS']['calrtag']:'R';
 		$line['showtips'] = isset($CFG['AMS']['showtips'])?$CFG['AMS']['showtips']:1;
+		$line['posttoforum'] = 0;
+        $line['msgtoinstr'] = isset($CFG['AMS']['msgtoinstr'])?$CFG['AMS']['msgtoinstr']:0;
 		if ($line['defpenalty'][0]==='L') {
 			$line['defpenalty'] = substr($line['defpenalty'],1);
 			$skippenalty=10;

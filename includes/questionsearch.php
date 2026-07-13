@@ -23,7 +23,7 @@ function parseSearchString($str)
         $str = preg_replace('/(author|type|uid|id|regex|used|avgtime|mine|intext|unused|private|public|res|order|lastmod|created|avgscore|isrand|isbroken|wronglib)(:|=)("[^"]+?"|\w+)/', '', $str);
     }
 
-    $out['terms'] = preg_split('/\s+/', trim($str));
+    $out['terms'] = preg_split('/\s+|(?<=[a-zA-Z]{3})-(?=[a-zA-Z])|(?<=[a-zA-Z])-(?=[a-zA-Z]{3})/', trim($str));
     foreach ($out['terms'] as $k => $v) {
         if ($v=='') { 
             unset($out['terms'][$k]);
@@ -157,6 +157,8 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
             }
         }
         if ($haspos && !$searchintext) {
+            // rolled back: didn't seem to help, maybe made it worse
+            //&& ($searchtype == 'all' || ($searchtype == 'libs' && count($libs)>5))
             foreach ($search['terms'] as $k => $v) {
                 $sgn = '+';
                 if ($v[0] == '!') {
@@ -302,12 +304,40 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
     $lib2query = '';
     $assessquery = '';
     $libnames = [];
+    $libshortnames = [];
+    $dolibbreadcrumbs = false;
     $libsIncludesUnassigned = false;
     $numNumberedLibs = 0;
     if ($searchtype == 'libs' && count($libs) > 0) {
         $llist = implode(',', array_map('intval', $libs));
         $sortorder = [];
-        $query = "SELECT il.name,il.id,il.sortorder FROM imas_libraries AS il ";
+        if ($GLOBALS['CFG']['MySQL_ver'] ?? 0 >= 8) {
+            $dolibbreadcrumbs = true;
+            $query = "WITH RECURSIVE ancestors AS (
+            SELECT id, name, parent, 0 AS depth, id AS root_libid
+            FROM imas_libraries
+            WHERE id IN ($llist)
+
+            UNION ALL
+
+            -- Recursive case: walk up to parent
+            SELECT l.id, l.name, l.parent, a.depth + 1, a.root_libid
+            FROM imas_libraries l
+            INNER JOIN ancestors a ON l.id = a.parent
+            WHERE a.parent != 0
+            ),
+            breadcrumbs AS (
+            SELECT root_libid AS libid,
+                    GROUP_CONCAT(name ORDER BY depth DESC SEPARATOR ' > ') AS breadcrumb
+            FROM ancestors
+            GROUP BY root_libid
+            )
+            SELECT il.name, il.id, il.sortorder, b.breadcrumb
+            FROM imas_libraries AS il 
+            JOIN breadcrumbs b ON il.id = b.libid ";
+        } else {
+            $query = "SELECT il.name,il.id,il.sortorder FROM imas_libraries AS il ";
+        }
         if (!empty($options['isgroupadmin'])) {
             $query .= "JOIN imas_users ON imas_users.id=il.ownerid ";
         }
@@ -324,15 +354,21 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
         }
         $stm = $DBH->prepare($query);
         $stm->execute($libqarr);
-        while ($row = $stm->fetch(PDO::FETCH_NUM)) {
-            $libnames[$row[1]] = Sanitize::encodeStringForDisplay($row[0]);
-            $sortorder[$row[0]] = $row[2];
+        while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
+            $libnames[$row['id']] = Sanitize::encodeStringForDisplay($row['breadcrumb'] ?? $row['name']);
+            $sortorder[$row['name']] = $row['sortorder'];
+            if ($dolibbreadcrumbs) {
+                $libshortnames[$row['id']] = Sanitize::encodeStringForDisplay($row['name']);
+            }
         }
         $numNumberedLibs = count($libnames);
         $llist = implode(',', array_map('intval', array_keys($libnames)));
         if (in_array(0, $libs)) {
             $libnames[0] = _('Unassigned');
             $libsIncludesUnassigned = true;
+            if ($dolibbreadcrumbs) {
+                $libshortnames[0] = _('Unassigned');
+            }
         }
         if ($llist != '') {
             $libquery = "ili.libid IN ($llist) AND ";
@@ -386,26 +422,32 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
             } else if ($searchtype != 'assess') {
                 $rightsand[] = '(imas_users.groupid=? OR iq.userights>0)';
                 $searchvals[] = $admingroupid;
-                // don't need, since we'll limit to groupid=? below
-                //$rightsand2[] = '(imas_users.groupid=? OR iq.userights>0)';
-                //$searchvals2[] = $admingroupid;
+                // groupid limit for unassigned is handled by separate query; only need here if no libquery
+                if ($libquery == '') {
+                    $rightsand2[] = '(imas_users.groupid=? OR iq.userights>0)';
+                    $searchvals2[] = $admingroupid;
+                }
             }
             if (isset($search['public']) && $search['public'] == 0) {
                 $rightsand[] = 'iq.userights=0';
                 $rightsand2[] = 'iq.userights=0';
             }
             if ($searchtype != 'assess' && isset($search['id'])) {
-                // not needed since libid>0
-                //$rightsand[] = '(ili.libid > 0 OR imas_users.groupid=? OR iq.id=?)';
-                //$searchvals[] = $admingroupid;
-                //$searchvals[] = $search['id'];
+                // no unassigned is handled by libquery; only need here if no libquery
+                if ($libquery == '') {
+                    $rightsand[] = '(ili.libid > 0 OR imas_users.groupid=? OR iq.id=?)';
+                    $searchvals[] = $admingroupid;
+                    $searchvals[] = $search['id'];
+                }
                 $rightsand2[] = '(imas_users.groupid=? OR iq.id=?)';
                 $searchvals2[] = $admingroupid;
                 $searchvals2[] = $search['id'];
             } else if ($searchtype != 'assess') {
-                // not needed since libid>0
-                //$rightsand[] = '(ili.libid > 0 OR imas_users.groupid=?)';
-                //$searchvals[] = $admingroupid;
+                // no unassigned is handled by libquery; only need here if no libquery
+                if ($libquery == '') {
+                    $rightsand[] = '(ili.libid > 0 OR imas_users.groupid=?)';
+                    $searchvals[] = $admingroupid;
+                }
                 $rightsand2[] = '(imas_users.groupid=?)';
                 $searchvals2[] = $admingroupid;
             }
@@ -424,17 +466,21 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
                 $rightsand2[] = 'iq.userights=0';
             }
             if ($searchtype != 'assess' && isset($search['id'])) {
-                // not needed since libid>0
-                //$rightsand[] = '(ili.libid > 0 OR iq.ownerid=? OR iq.id=?)';
-                //$searchvals[] = $userid;
-                //$searchvals[] = $search['id'];
+                // no unassigned is handled by libquery; only need here if no libquery
+                if ($libquery == '') {
+                    $rightsand[] = '(ili.libid > 0 OR iq.ownerid=? OR iq.id=?)';
+                    $searchvals[] = $userid;
+                    $searchvals[] = $search['id'];
+                }
                 $rightsand2[] = '(iq.ownerid=? OR iq.id=?)';
                 $searchvals2[] = $userid;
                 $searchvals2[] = $search['id'];
             } else if ($searchtype != 'assess') {
-                // not needed since libid>0
-                //$rightsand[] = '(ili.libid > 0 OR iq.ownerid=?)';
-                //$searchvals[] = $userid;
+                // no unassigned is handled by libquery; only need here if no libquery
+                if ($libquery == '') {
+                    $rightsand[] = '(ili.libid > 0 OR iq.ownerid=?)';
+                    $searchvals[] = $userid;
+                }
                 $rightsand2[] = '(iq.ownerid=?)';
                 $searchvals2[] = $userid;
             }
@@ -692,7 +738,7 @@ function searchQuestions($search, $userid, $searchtype, $libs = array(), $option
                 return ($a['id'] < $b['id']) ? -1 : 1;
             }
         });
-        $out = ['qs' => $res, 'names' => $libnames, 'type'=>'libs'];
+        $out = ['qs' => $res, 'names' => $libnames, 'shortnames' => $libshortnames, 'type'=>'libs'];
     } else {
         $out = ['qs' => $res, 'type'=>'all', 'names' => []];
     }
@@ -874,9 +920,8 @@ function outputSearchUI($searchtype = 'libs', $searchterms = '', $search_results
 </div>
 <div class="selectedlibs short" <?php if ($searchtype=='all') { echo 'style="display:none;"';}?>>
     <span id="libnames" tabindex="-1">
-        <?php if (is_array($search_results) && isset($search_results['names'])) {
-            echo Sanitize::encodeStringForDisplay(implode(', ', $search_results['names'])); 
-        }    
+        <?php  
+        echo Sanitize::encodeStringForDisplay(implode(', ', $search_results['shortnames'] ?? $search_results['names'] ?? []));  
         ?>
     </span>
     <button class="viewall" onclick="this.style.display='none';this.parentNode.classList.remove('short');document.getElementById('libnames').focus();">

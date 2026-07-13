@@ -15,13 +15,20 @@
         :active = "page === -1 && hasIntro"
         :html = "intro"
       />
+      <feedback 
+        :active = "page === -1"
+        qn = "general"
+      />
       <div
         v-for = "(pageData,pagenum) in allPages"
         :key = "pagenum"
         :class="{inactive: pagenum !== page}"
         :aria-hidden = "pagenum !== page"
       >
-        <div v-if = "pageData[0].questions.length === 0" class="noqtext">
+        <div v-if = "pageData[0].hasOwnProperty('showworksingle')">
+          <showwork-single showheader="true" />
+        </div>
+        <div v-else-if = "pageData[0].questions.length === 0" class="noqtext">
           <inter-question-text-list
             pos="all"
             :textlist = "pageData"
@@ -45,6 +52,10 @@
             />
             <div>
               <full-question-header :qn = "curqn" />
+              <feedback 
+                :active = "pagenum === page"
+                :qn = "curqn"
+              />
               <question
                 :qn="curqn"
                 :active = "pagenum === page"
@@ -95,6 +106,8 @@ import FullQuestionHeader from '@/components/FullQuestionHeader.vue';
 import Question from '@/components/question/Question.vue';
 import InterQuestionTextList from '@/components/InterQuestionTextList.vue';
 import IntroText from '@/components/IntroText.vue';
+import Feedback from '@/components/Feedback.vue';
+import ShowworkSingle from '@/components/ShowworkSingle.vue';
 import { store, actions } from '@/basicstore';
 
 export default {
@@ -105,14 +118,20 @@ export default {
     FullPagedNav,
     FullQuestionHeader,
     InterQuestionTextList,
-    IntroText
+    IntroText,
+    Feedback,
+    ShowworkSingle
   },
   computed: {
     page () {
       return parseInt(this.$route.params.page) - 1;
     },
     allPages () {
-      return store.assessInfo.interquestion_pages;
+      if (this.showSingleShowwork) {
+        return [...store.assessInfo.interquestion_pages, [{questions:[], showworksingle: 1}]];
+      } else {
+        return store.assessInfo.interquestion_pages;
+      }
     },
     intro () {
       return store.assessInfo.intro;
@@ -131,6 +150,10 @@ export default {
         out[i] = qlist[qlist.length - 1];
       }
       return out;
+    },
+    showSingleShowwork () {
+      return ((store.assessInfo.singleshowwork & 8) &&  // single showwork
+              (store.assessInfo.singleshowwork & 1));   // during
     }
   },
   methods: {

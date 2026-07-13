@@ -29,11 +29,14 @@ $vueData = array(
 	'datesbylti' => intval($line['date_by_lti']),
 	'allowpractice' => $line['reviewdate']>0,
 	'displaymethod' => $line['displaymethod'],
-	'subtype' => $line['submitby'],
+	'subtype' => ($line['displaymethod'] === 'drill') ? 'drill' : $line['submitby'],
+	'drillstyle' => $line['drilljson']['style'],
+	'drilln' => $line['drilljson']['n'],
 	'defregens' => $line['defregens'],
 	'defregenpenalty' => $defregenpenalty,
 	'defregenpenaltyaftern' => $defregenpenalty_aftern,
 	'keepscore' => $line['keepscore'],
+	'retakewait' => $line['retakewait'],
 	'defattempts' => $line['defattempts'],
 	'defattemptpenalty' => $defattemptpenalty,
 	'defattemptpenaltyaftern' => $defattemptpenalty_aftern,
@@ -49,6 +52,7 @@ $vueData = array(
 	'shuffle' => ($line['shuffle']&(1+16+32)),
 	'noprint' => ($line['noprint']&1) > 0,
     'lockforassess' => ($line['noprint']&2) > 0,
+    'nodetailedsoln' => ($line['noprint']&4) > 0,
 	'sameseed' => ($line['shuffle']&2) > 0,
 	'samever' => ($line['shuffle']&4) > 0,
 	'istutorial' => $line['istutorial'] > 0,
@@ -67,6 +71,7 @@ $vueData = array(
 	'showhints' => ($line['showhints']&1) > 0,
     'showwork' => ($line['showwork']&3),
     'showworktype' => ($line['showwork']&4),
+	'showworkonebox' => ($line['showwork']&8),
     'doworkcutoff' => ($line['workcutoff'] > 0),
     'workcutofftype' => $workcutofftype,
     'workcutoffval' => $workcutoffval,
@@ -87,6 +92,8 @@ $vueData = array(
 	'allowinstraddtutors' => (!isset($CFG['GEN']['allowinstraddtutors']) || $CFG['GEN']['allowinstraddtutors']==true),
 	'tutoredit' => $line['tutoredit'],
 	'exceptionpenalty' => $line['exceptionpenalty'],
+	'exceptionpenaltytype' => ($line['exceptionpenaltyinterval'] > 0) ? 'increasing' : 'fixed',
+	'exceptionpenaltyinterval' => ($line['exceptionpenaltyinterval'] > 0) ? $line['exceptionpenaltyinterval'] : 24,
 	'earlybonus' => ($line['earlybonus'] % 100),
 	'earlybonushrs' => max(1,floor($line['earlybonus'] / 100)),
 	'defoutcome' => $line['defoutcome'],
@@ -97,13 +104,13 @@ $vueData = array(
 	'groupsetid' => $line['groupsetid'],
 	'groupOptions' => $groupOptions,
 	'reqscoreshowtype' => $reqscoredisptype,
-	'reqscore' => abs($line['reqscore']),
-	'reqscorecalctype' => ($line['reqscoretype']&2) > 0 ? 1 : 0,
-	'reqscoreaid' => $line['reqscoreaid'],
+	'reqscorearr' => $line['reqscorejson'],
+	'reqscoreandor' => $reqscoreandor,
 	'reqscoreOptions' => $otherAssessments,
 	'copyfrom' => 0,
 	'taken' => $taken,
-	'showDisplayDialog' => false
+	'showDisplayDialog' => false,
+	'newAssessId' => ''
 );
 
 // skipmathrender class is needed to prevent katex parser from mangling
@@ -237,24 +244,27 @@ $vueData = array(
 			<?php echo _('Core Options');?>
 		</div>
 		<div class="blockitems">
-			<label class=form for="displaymethod"><?php echo _('Display style');?>:</label>
-			<span class=formright>
-				<select name="displaymethod" id=displaymethod v-model="displaymethod">
-					<option value="skip"><?php echo _('One question at a time');?></option>
-					<option value="full"><?php echo _('All questions at once, or in pages');?></option>
-					<option value="video_cued"><?php echo _('Video Cued');?></option>
-					<?php if (isset($CFG['GEN']['livepollserver'])) {
-						echo '<option value="livepoll">',_('Live Poll'),'</option>';
-					}?>
-				</select>
-				<a href="#" id="dispdetails" @click.prevent="doShowDisplayDialog"><?php echo _('Details');?></a>
-			</span><br class=form />
+			<div v-show="subtype != 'drill'">
+				<label class=form for="displaymethod"><?php echo _('Display style');?>:</label>
+				<span class=formright>
+					<select name="displaymethod" id=displaymethod v-model="displaymethod">
+						<option value="skip"><?php echo _('One question at a time');?></option>
+						<option value="full"><?php echo _('All questions at once, or in pages');?></option>
+						<option value="video_cued"><?php echo _('Video Cued');?></option>
+						<?php if (isset($CFG['GEN']['livepollserver'])) {
+							echo '<option value="livepoll">',_('Live Poll'),'</option>';
+						}?>
+					</select>
+					<a href="#" id="dispdetails" @click.prevent="doShowDisplayDialog"><?php echo _('Details');?></a>
+				</span><br class=form />
+			</div>
 
 			<label class="form" for="subtype"><?php echo _('Submission type');?>:</label>
 			<span class="formright">
 				<select name="subtype" id="subtype" v-model="subtype">
 					<option value="by_question"><?php echo _('Homework-style: new versions of individual questions');?></option>
 					<option value="by_assessment"><?php echo _('Quiz-style: retake whole assessment with new versions');?></option>
+					<option value="drill"><?php echo _('Drill style: practice questions until a goal is met');?></option>
 				</select>
 				<span v-if="taken" class="noticetext">
 					<br/>
@@ -262,43 +272,70 @@ $vueData = array(
 				</span>
 			</span><br class=form />
 
+			<div v-if="subtype == 'drill'">
+				<label class=form for="drillstyle"><?php echo _('Drill style');?>:</label>
+				<span class=formright>
+					<select name="drillstyle" id="drillstyle" v-model="drillstyle">
+						<option value="time_maxcorrect"><?php echo _('Do as many correct as possible in N seconds');?></option>
+						<option value="count_time"><?php echo _('Do N questions then stop. Record time');?></option>
+						<option value="count_correct_time"><?php echo _('Do N questions correctly then stop. Record time');?></option>
+						<option value="count_correct_attempts"><?php echo _('Do N questions correctly then stop. Record total attempts');?></option>
+						<option value="streak_time"><?php echo _('Do N questions correctly in a row. Record time');?></option>
+						<option value="streak_attempts"><?php echo _('Do N questions correctly in a row. Record total attempts');?></option>
+					</select>
+				</span><br class=form />
 
-			<span class=form><?php echo _('Versions');?>:</span>
-			<span class=formright>
+				<label class=form for="drilln">N=</label>
+				<span class=formright>
+					<input type=number min=1 max=1000 size=4 id="drilln"
+						name="drilln" v-model.number="drilln" />
+				</span><br class=form />
+			</div>
 
-				<label for="defregens" v-show="subtype == 'by_question'">
-					<?php echo _('Number of versions for each question');?>:
-				</label>
-				<label for="defregens" v-show="subtype == 'by_assessment'">
-					<?php echo _('Number of times assessment can be taken');?>:
-				</label>
-				<input type=number min=1 max=100 size=3 id="defregens"
-					name="defregens" v-model.number="defregens" />
-				<span v-if="defregens > 1">
-					<br/>
-					<?php echo _('With a penalty of');?>
-					<label><input type=number min=0 max=100 size=3 id="defregenpenalty"
-						name="defregenpenalty" v-model.number="defregenpenalty" />%
-					<?php echo _('per version');?></label>
-					<span v-show="defregenpenalty>0">
-						<?php echo _('after');?>
-						<label><input type=number min=1 :max="Math.min(defregens,9)" size=3 id="defregenpenaltyaftern"
-							name="defregenpenaltyaftern" v-model.number="defregenpenaltyaftern" />
-						<?php echo _('full-credit versions');?></label>
+			<div v-show="subtype != 'drill'">
+				<span class=form><?php echo _('Versions');?>:</span>
+				<span class=formright>
+
+					<label for="defregens" v-show="subtype == 'by_question'">
+						<?php echo _('Number of versions for each question');?>:
+					</label>
+					<label for="defregens" v-show="subtype == 'by_assessment'">
+						<?php echo _('Number of times assessment can be taken');?>:
+					</label>
+					<input type=number min=1 max=999 size=3 id="defregens"
+						name="defregens" v-model.number="defregens" />
+					<span v-if="defregens > 1">
+						<br/>
+						<?php echo _('With a penalty of');?>
+						<label><input type=number min=0 max=100 size=3 id="defregenpenalty"
+							name="defregenpenalty" v-model.number="defregenpenalty" />%
+						<?php echo _('per version');?></label>
+						<span v-show="defregenpenalty>0">
+							<?php echo _('after');?>
+							<label><input type=number min=1 :max="Math.min(defregens,9)" size=3 id="defregenpenaltyaftern"
+								name="defregenpenaltyaftern" v-model.number="defregenpenaltyaftern" />
+							<?php echo _('full-credit versions');?></label>
+						</span>
+						<br/>
+						<span v-if="subtype == 'by_assessment'">
+							<label for="keepscore">
+								<?php echo _('Score to keep');?>:
+							</label>
+							<select id="keepscore" name="keepscore" v-model="keepscore">
+								<option value="best"><?php echo _('Best');?></option>
+								<option value="last"><?php echo _('Last');?></option>
+								<option value="average"><?php echo _('Average');?></option>
+							</select>
+							<br/>
+							<label>
+								<?php echo _('Require wait between retakes');?>:
+								<input type=text id="retakewait" name="retakewait" v-model="retakewait" size="5" />
+								<?php echo _('hours'); ?>
+							</label>
+						</span>
 					</span>
-					<br/>
-					<span v-if="subtype == 'by_assessment'">
-						<label for="keepscore">
-							<?php echo _('Score to keep');?>:
-						</label>
-						<select id="keepscore" name="keepscore" v-model="keepscore">
-							<option value="best"><?php echo _('Best');?></option>
-							<option value="last"><?php echo _('Last');?></option>
-							<option value="average"><?php echo _('Average');?></option>
-						</select>
-					</span>
-				</span>
-			</span><br class=form />
+				</span><br class=form />
+			</div>
 
 
 			<span class=form><?php echo _('Tries');?>:</span>
@@ -436,6 +473,14 @@ $vueData = array(
                         <option value="4"><?php echo _('File upload');?></option>
                     </select>
                 </span>
+				<span v-if="showwork > 0">
+                    <br>
+                    <label for="showworktype"><?php echo _('Work entry format');?>:</label>
+                    <select name="showworkonebox" id="showworkonebox" v-model="showworkonebox">
+                        <option value="0"><?php echo _('Separate entry for each question');?></option>
+                        <option value="8"><?php echo _('One entry for the whole assessment');?></option>
+                    </select>
+                </span>
                 <span>
                     <br>
                     <input type="checkbox" v-model="doworkcutoff" name="doworkcutoff" id="doworkcutoff" value="1"> 
@@ -465,6 +510,11 @@ $vueData = array(
 				<label>
 					<input type="checkbox" value="1" name="noprint" v-model="noprint" />
 					<?php echo _('Make hard to print');?>
+				</label>
+				<br/>
+				<label>
+					<input type="checkbox" value="4" name="nodetailedsoln" v-model="nodetailedsoln" />
+					<?php echo _('Don\'t show detailed solutions with answers during assessment');?>
 				</label>
 				<label v-show="subtype != 'by_question' || defregens==1">
 					<br/>
@@ -564,18 +614,38 @@ $vueData = array(
 					<option value="1"><?php echo _('Show greyed until');?></option>
 				</select>
 				<span v-show="reqscoreshowtype > -1">
-					<span id="reqscorelbl1"><?php echo _('a score of');?></span>
-	 				<input type=text size=4 name=reqscore v-model="reqscore" aria-labelledby="reqscoreshowtype reqscorelbl1"/>
-					<select name="reqscorecalctype" v-model="reqscorecalctype" aria-label="<?php echo _('prerequisite score format');?>">
-						<option value="0"><?php echo _('points');?></option>
-						<option value="1"><?php echo _('percent');?></option>
+					<select id="reqscoreandor" name="reqscoreandor" v-model="reqscoreandor" aria-label="<?php echo _('prerequisite require all or one'); ?>">
+						<option value="0"><?php echo _('All of these');?></option>
+						<option value="1"><?php echo _('Any one of these');?></option>
 					</select>
-					<label for=reqscoreaid><?php echo _('is obtained on');?></label>
-					<select name="reqscoreaid" id="reqscoreaid" v-model="reqscoreaid">
-						<option v-for="option in reqscoreOptions" :value="option.value" :key="option.value">
-							{{ option.text }}
-						</option>
-					</select>
+					<ul class="nomark">
+						<li v-for="(ritem,index) in reqscorearr" :key="index">
+							<input type="hidden" name="reqscoreaid[]" v-model="ritem[0]"/>
+							<label>
+								{{ assessmentName(ritem[0]) }}:
+								<?php echo _('Score of');?>
+								<input size=3 type="number" name="reqscore[]" v-model="ritem[1]" min="0" max="9999"/>
+							</label>
+							<select name="reqscorecalctype[]" v-model="ritem[2]" aria-label="<?php echo _('prerequisite score format');?>">
+								<option value="0"><?php echo _('points');?></option>
+								<option value="1"><?php echo _('percent');?></option>
+							</select>
+							<button class="slim" type="button" @click="reqscorearr.splice(index, 1)"><?php echo _('Remove');?></button>
+						</li>
+						<li>
+							<select v-model="newAssessId">
+								<option value=""><?php echo _('Add prerequisite');?>…</option>
+								<option v-for="a in availableAssessmentsForPrereqs" :key="a.value" :value="a.value">
+									{{ a.text }}
+								</option>
+							</select>
+							<button type="button" 
+								@click="reqscorearr.push([newAssessId, 1, 0]); newAssessId = ''" 
+								:disabled="!newAssessId">
+								<?php echo _('Add');?>
+							</button>
+						</li>
+					</ul>
 				</span>
 			</span><br class=form />
 		</div>
@@ -708,12 +778,23 @@ $vueData = array(
 				</span><br class="form" />
 			</div>
 
-			<label for="exceptionpenalty" class=form>
+			<label for="exceptionpenaltytype" class=form>
 				<?php echo _('Penalty for questions done while in exception/LatePass');?>:
 			</label>
 			<span class=formright>
+				<select name="exceptionpenaltytype" id="exceptionpenaltytype" v-model="exceptionpenaltytype">
+					<option value="fixed"><?php echo _('Fixed');?></option>
+					<option value="increasing"><?php echo _('Increasing');?></option>
+				</select>
 				<input type=number size=3 name="exceptionpenalty" id="exceptionpenalty" min=0 max=99
-				 	v-model="exceptionpenalty">%
+				 	v-model="exceptionpenalty" aria-label="<?php echo _('exception penalty percent');?>">%
+				<span v-if="exceptionpenaltytype=='increasing'">
+					<?php echo _('per');?>
+					<input type=number size=3 name="exceptionpenaltyinterval" id="exceptionpenaltyinterval" min=1 max=9999
+					 	v-model="exceptionpenaltyinterval"
+						aria-label="<?php echo _('exception penalty hours per increment');?>"
+					> <?php echo _('hours');?>
+				</span>
 			</span><br class=form />
 
 			<label for="earlybonus" class=form>
@@ -1055,7 +1136,11 @@ createApp({
 				}
 				return out;
  			}
-		}
+		},
+		availableAssessmentsForPrereqs() {
+			const used = new Set(this.reqscorearr.map(p => p[0]));
+			return this.reqscoreOptions.filter(a => !used.has(a.value));
+		},
 	},
 	methods: {
 		valueInOptions: function(optArr, value) {
@@ -1086,7 +1171,10 @@ createApp({
 		closeDisplayDialog: function() {
 			this.showDisplayDialog = false;
 			$("#dispdetails").focus();
-		}
+		}, 
+		assessmentName(id) {
+			return this.reqscoreOptions.find(a => a.value == id)?.text ?? id;
+		},
 	}
 }).mount('#app');
 </script>

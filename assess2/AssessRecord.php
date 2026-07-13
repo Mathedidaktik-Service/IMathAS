@@ -12,6 +12,7 @@ require_once __DIR__ . '/questions/models/ShowAnswer.php';
 require_once __DIR__ . '/questions/ScoreEngine.php';
 require_once __DIR__ . '/questions/models/ScoreQuestionParams.php';
 require_once __DIR__ . '/../includes/TeacherAuditLog.php';
+require_once __DIR__ . '/../includes/exceptionfuncs.php';
 
 use IMathAS\assess2\questions\QuestionGenerator;
 use IMathAS\assess2\questions\models\QuestionParams;
@@ -44,6 +45,7 @@ class AssessRecord
   private $inTransaction = false;
   private $new_excusals = [];
   private $include_errors = false;
+  private $drillLastOutcome = array();
 
   /**
    * Construct object
@@ -434,6 +436,11 @@ class AssessRecord
       if ($isWithdrawn) {
         $out['questions'][$k]['withdrawn'] = 1;
       }
+      if ($this->assess_info->getSetting('displaymethod') === 'drill') {
+        $out['questions'][$k]['drillstatus'] = 0;
+        $out['questions'][$k]['drillcount'] = 0;
+        $out['questions'][$k]['drillresults'] = array();
+      }
     }
     $this->data['assess_versions'][] = $out;
 
@@ -474,6 +481,259 @@ class AssessRecord
     // note that record needs to be saved
     $this->need_to_record = true;
     return $question;
+  }
+
+  /**
+   * Start (or restart) a drill session for a question. If the question's
+   * current version was already completed (drillcomplete set from a prior
+   * run), resets question_versions/drillcount so the run starts fresh.
+   * @param  int  $qn   Question #
+   * @param  int  $qid  Current Question ID
+   * @return int  Question ID of the version now active
+   */
+  public function startDrillQuestion($qn, $qid) {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $qdata = &$this->data['assess_versions'][$lastaver]['questions'][$qn];
+    if (count($qdata['question_versions']) > 1 || !empty($qdata['drillcomplete'])) {
+      // a previous run completed (or left extra versions behind); reset for a fresh run
+      list($oldquestions, $oldseeds) = $this->getOldQuestions($qn);
+      list($newq, $newseed) = $this->assess_info->regenQuestionAndSeed($qid, $oldseeds, $oldquestions);
+      $qdata['question_versions'] = array(array(
+        'qid' => $newq,
+        'seed' => $newseed,
+        'tries' => array()
+      ));
+      $qdata['drillcount'] = 0;
+      unset($qdata['drillcomplete']);
+      $qid = $newq;
+      unset($this->data['autosaves'][$qn]);
+    }
+    $qdata['drillstatus'] = 1;
+    if ($this->assess_info->getSetting('drillsettings')['style'] === 'time_maxcorrect') {
+      $qdata['drillend'] = $this->now + $this->assess_info->getSetting('drillsettings')['n'];
+    } else {
+      unset($qdata['drillend']);
+    }
+    $this->need_to_record = true;
+    return $qid;
+  }
+
+  /**
+   * Stop the active drill session for a question (e.g. student navigated
+   * away without completing it). No score/version changes.
+   * @param  int  $qn   Question #
+   * @return void
+   */
+  public function stopDrillQuestion($qn) {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $this->data['assess_versions'][$lastaver]['questions'][$qn]['drillstatus'] = 0;
+    unset($this->data['assess_versions'][$lastaver]['questions'][$qn]['drillend']);
+    $this->need_to_record = true;
+  }
+
+  /**
+   * Find the question number currently being actively drilled (drillstatus=1),
+   * if any. Only one question can be actively drilling at a time.
+   * @return int  Question #, or -1 if none is active
+   */
+  public function getActiveDrillQuestion() {
+    $lastaver = count($this->data['assess_versions'])-1;
+    foreach ($this->data['assess_versions'][$lastaver]['questions'] as $qn => $qdata) {
+      if (!empty($qdata['drillstatus'])) {
+        return $qn;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Check drill progress after a question has been scored: reshow as-is if
+   * still eligible for another try, auto-regenerate if this version is done
+   * but the drill goal isn't met yet, or complete the drill (drillcomplete,
+   * append to drillresults) if the goal (or time limit) has been reached.
+   * Call after AssessRecord::scoreQuestion() for a drill-mode question.
+   * @param  int  $qn   Question #
+   * @return void
+   */
+  public function processDrillProgress($qn) {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $qdata = &$this->data['assess_versions'][$lastaver]['questions'][$qn];
+    if (empty($qdata['drillstatus'])) {
+      return; // not actively drilling
+    }
+    $drillsettings = $this->assess_info->getSetting('drillsettings');
+    $style = $drillsettings['style'];
+    $n = $drillsettings['n'];
+
+    $qobj = $this->getQuestionObject($qn, true, false, false);
+    $isCorrect = ($qobj['status'] === 'correct');
+    $triesExhausted = ($qobj['try'] >= $qobj['tries_max']);
+    $timedOut = ($style === 'time_maxcorrect' && !empty($qdata['drillend']) && $this->now >= $qdata['drillend']);
+
+    if (!$isCorrect && !$triesExhausted && !$timedOut) {
+      // still eligible for another try on this version; nothing to do
+      return;
+    }
+
+    // this version is done (correct, out of tries, or time expired) -
+    // update running progress per the style's rule
+    switch ($style) {
+      case 'count_time':
+        $qdata['drillcount']++;
+        break;
+      case 'streak_time':
+      case 'streak_attempts':
+        $qdata['drillcount'] = $isCorrect ? $qdata['drillcount'] + 1 : 0;
+        break;
+      default: // count_correct_time, count_correct_attempts, time_maxcorrect
+        if ($isCorrect) {
+          $qdata['drillcount']++;
+        }
+        break;
+    }
+
+    $goalMet = ($style === 'time_maxcorrect') ? $timedOut : ($qdata['drillcount'] >= $n);
+
+    if ($goalMet) {
+      $this->recordDrillCompletion($qdata, $style, $n);
+    } else if (!$isCorrect && $triesExhausted &&
+      $this->assess_info->getSetting('showans') === 'after_lastattempt'
+    ) {
+      // tries exhausted without a correct answer, and the assessment shows
+      // answers after the last attempt - pause here (leaving this version
+      // displayed, with its answer reveal, instead of immediately
+      // regenerating) until the student explicitly asks to move on via
+      // advanceDrillQuestion()
+      $qdata['drillawaitingnext'] = 1;
+    } else {
+      // keep drilling - regenerate a new version. Record the outcome that
+      // triggered this regen (request-scoped only, not persisted) so the
+      // response can tell the frontend what just happened, since the
+      // regenerated version's own status won't reflect it.
+      if ($isCorrect) {
+        $this->drillLastOutcome[$qn] = 'correct';
+      } else if ($qobj['status'] === 'partial') {
+        $this->drillLastOutcome[$qn] = 'partial';
+      } else {
+        $this->drillLastOutcome[$qn] = 'incorrect';
+      }
+      $this->buildNewQuestionVersion($qn, $qdata['question_versions'][count($qdata['question_versions'])-1]['qid']);
+    }
+    $this->need_to_record = true;
+  }
+
+  /**
+   * Move on from a version left displayed by processDrillProgress()'s
+   * showans='after_lastattempt' pause (see above), regenerating a new
+   * version. No-op (returns the current qid unchanged) if not actually
+   * awaiting a next question.
+   * @param  int  $qn   Question #
+   * @return int  Question ID of the version now active
+   */
+  public function advanceDrillQuestion($qn) {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $qdata = &$this->data['assess_versions'][$lastaver]['questions'][$qn];
+    $curq = $qdata['question_versions'][count($qdata['question_versions'])-1];
+    if (empty($qdata['drillawaitingnext'])) {
+      return $curq['qid'];
+    }
+    unset($qdata['drillawaitingnext']);
+    $newqid = $this->buildNewQuestionVersion($qn, $curq['qid']);
+    $this->need_to_record = true;
+    return $newqid;
+  }
+
+  /**
+   * Compute the drill display name for a question. If the qid is part of a
+   * pool group ("select n from group"), uses the group's label - with a
+   * per-slot number appended when the group selects more than one - instead
+   * of the individual per-question display name, since a pool group's
+   * members typically share a conceptual name (e.g. "Add 1"/"Add 2").
+   *
+   * The per-slot number is derived from which question numbers currently
+   * hold a qid from this group's pool, sorted ascending - not from the
+   * (possibly shuffled) selection order in assignQuestionsAndSeeds(). This
+   * is deliberate: regenQuestionAndSeed() only ever swaps a qn's qid for
+   * another member of the *same* pool, so this qn-based set (and thus each
+   * qn's position within it) is stable across regens without needing any
+   * changes to the assignment/shuffle logic itself.
+   * @param  int    $qn    Question #
+   * @param  int    $qid   Current question ID for this qn
+   * @param  array  $aver  Current assess version data (for cross-question lookup)
+   * @return string
+   */
+  private function getDrillDispname($qn, $qid, $aver) {
+    $group = null;
+    foreach ($this->assess_info->getSetting('itemorder') as $entry) {
+      if (is_array($entry) && $entry['type'] === 'pool' && in_array($qid, $entry['qids'])) {
+        $group = $entry;
+        break;
+      }
+    }
+    if ($group === null) {
+      // not part of a group - individual per-question display name
+      $dispnames = $this->assess_info->getSetting('drillsettings')['dispnames'];
+      return (is_array($dispnames) && !empty($dispnames['qn' . $qid])) ? $dispnames['qn' . $qid] : '';
+    }
+    if ($group['grouplabel'] === '' || $group['n'] <= 1) {
+      return $group['grouplabel'];
+    }
+    $matchingQns = array();
+    foreach ($aver['questions'] as $otherQn => $qdata) {
+      $otherVers = $qdata['question_versions'];
+      $otherQid = $otherVers[count($otherVers) - 1]['qid'];
+      if (in_array($otherQid, $group['qids'])) {
+        $matchingQns[] = $otherQn;
+      }
+    }
+    sort($matchingQns);
+    $index = array_search($qn, $matchingQns);
+    return $group['grouplabel'] . ' ' . ($index + 1);
+  }
+
+  /**
+   * Force-finish a timed drill session (time_maxcorrect style) when the
+   * timer runs out client-side with no pending answer to score. Safe to
+   * call even if not actually timed out yet (it'll just no-op).
+   * @param  int  $qn   Question #
+   * @return void
+   */
+  public function finishDrillTimeout($qn) {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $qdata = &$this->data['assess_versions'][$lastaver]['questions'][$qn];
+    if (empty($qdata['drillstatus']) || empty($qdata['drillend']) || $this->now < $qdata['drillend']) {
+      return; // not actively drilling, or not actually timed out
+    }
+    $drillsettings = $this->assess_info->getSetting('drillsettings');
+    $this->recordDrillCompletion($qdata, $drillsettings['style'], $drillsettings['n']);
+    $this->need_to_record = true;
+  }
+
+  /**
+   * Record a completed drill run: mark drillcomplete (distinct from
+   * scoreoverride, which is reserved for manual teacher grade overrides),
+   * append to drillresults, and clear drillstatus/drillend.
+   * @param  array  &$qdata  Reference to assess_versions[...]['questions'][qn]
+   * @param  string $style   Drill style key
+   * @param  int    $n       Drill N= setting
+   * @return void
+   */
+  private function recordDrillCompletion(&$qdata, $style, $n) {
+    $qdata['drillcomplete'] = 1;
+    $time = 0;
+    foreach ($qdata['question_versions'] as $qv) {
+      $time += $this->calcTimeActive($qv)['total'];
+    }
+    $qdata['drillresults'][] = array(
+      'style' => $style,
+      'n' => $n,
+      'time' => round($time),
+      'attempts' => count($qdata['question_versions']),
+      'correct' => $qdata['drillcount'],
+      'completed' => $this->now
+    );
+    $qdata['drillstatus'] = 0;
+    unset($qdata['drillend']);
   }
 
   /**
@@ -782,13 +1042,13 @@ class AssessRecord
         if (!$active && $this->data['assess_versions'][$lastver]['lastchange'] === 0) {
           $this->data['assess_versions'][$lastver]['lastchange'] = 
             !empty($this->data['assess_versions'][$lastver]['timelimit_end']) ? 
-            $this->data['assess_versions'][$lastver]['timelimit_end'] :
+            min($this->data['assess_versions'][$lastver]['timelimit_end'], $this->now) :
             $this->now;
         }
         if (!$active && intval($this->assessRecord['lastchange']) === 0) {
           $this->assessRecord['lastchange'] = 
             !empty($this->data['assess_versions'][$lastver]['timelimit_end']) ? 
-            $this->data['assess_versions'][$lastver]['timelimit_end'] :
+            min($this->data['assess_versions'][$lastver]['timelimit_end'], $this->now) :
             $this->now;
         }
         // if there's a time limit, set the time limit
@@ -847,6 +1107,10 @@ class AssessRecord
    */
   public  function setAutoSave($time, $timeactive, $qn, $pn) {
     $err = '';
+    if ($qn === 'gen') {
+      $this->saveWork([$qn => $_POST['sw' . $qn]], true);
+      return;
+    }
     $qn = intval($qn);
     $this->parseData();
     $data = &$this->data['autosaves'];
@@ -1503,6 +1767,23 @@ class AssessRecord
       $out['rubric'] = $this->assess_info->getQuestionSetting($curq['qid'], 'rubric');
     }
 
+    if ($this->assess_info->getSetting('displaymethod') === 'drill') {
+      $out['drillstatus'] = $aver['questions'][$qn]['drillstatus'] ?? 0;
+      $out['drillcount'] = $aver['questions'][$qn]['drillcount'] ?? 0;
+      $out['drillresults'] = $aver['questions'][$qn]['drillresults'] ?? array();
+      $out['drillcomplete'] = !empty($aver['questions'][$qn]['drillcomplete']);
+      $out['drillawaitingnext'] = !empty($aver['questions'][$qn]['drillawaitingnext']);
+      if (isset($this->drillLastOutcome[$qn])) {
+        $out['drilllastoutcome'] = $this->drillLastOutcome[$qn];
+      }
+      $out['dispname'] = $this->getDrillDispname($qn, $curq['qid'], $aver);
+      if (!empty($aver['questions'][$qn]['drillend'])) {
+        // relative seconds remaining, not an absolute timestamp, to avoid
+        // client/server clock skew (matches timelimit_expiresin convention)
+        $out['drillend_in'] = max(0, $aver['questions'][$qn]['drillend'] - $this->now);
+      }
+    }
+
     // get regen number for by_question
     if ($by_question) {
       if (!is_numeric($ver)) {
@@ -1527,6 +1808,7 @@ class AssessRecord
     if ($include_scores) {
       $out['gbscore'] = $aver['questions'][$qn]['score'];
       $out['gbrawscore'] = $aver['questions'][$qn]['rawscore'];
+      $out['feedback'] = $curq['feedback'] ?? '';
     }
 
     // set tries
@@ -1664,6 +1946,7 @@ class AssessRecord
           && $include_scores
         ) ||
         $this->teacherInGb;
+        
       $out['info'] = $generate_html;
       $out += $this->getQuestionHtml($qn, $ver, false, $force_scores, $force_answers, $tryToShow, $generate_html === 2);
       if ($out['usedautosave']) {
@@ -1701,6 +1984,15 @@ class AssessRecord
 
 
     return $out;
+  }
+
+  /**
+   * Get singlebox showwork
+   * @param string $ver    version to get work for
+   */
+  public function getGenShowwork($ver = 'last') {
+    $aver = $this->getAssessVer($ver);
+    return [$aver['swgen'] ?? '', isset($aver['swgentime']) ? tzdate("n/j/y, g:i a", $aver['starttime'] + $aver['swgentime']) : ''];
   }
 
   /**
@@ -1818,6 +2110,16 @@ class AssessRecord
   }
 
   /**
+   * Get the assessment-level feedback
+   * @param  int|string  $ver               Which version to grab data for, or 'last' for most recent, or 'scored'
+   * @return string   feedback
+   */
+  public function getGenFeedback($ver = 'last') {
+    $assessver = $this->getAssessVer($ver);
+    return ($assessver['feedback'] ?? '');
+  }
+
+  /**
    * get question part score details
    * @param  int  $qn             The question number
    * @param  string  $ver         The attempt to use, or 'last' for most recent, or 'scored' for scored
@@ -1872,7 +2174,7 @@ class AssessRecord
     }
 
     $qsettings = $this->assess_info->getQuestionSettings($qver['qid']);
-    $exceptionPenalty = $this->assess_info->getSetting('exceptionpenalty');
+    $latePenaltyParams = $this->assess_info->getLatePenaltyParams();
     $earlyBonus = $this->assess_info->getSetting('earlybonus');
     $overtimePenalty = $this->assess_info->getSetting('overtime_penalty');
 
@@ -1947,7 +2249,7 @@ class AssessRecord
             $retakepenalty['n'],
             $due_date,           // the due date
             $starttime + $submissions[$parttry['sub']], // submission time
-            $exceptionPenalty,
+            $latePenaltyParams,
             $earlyBonus,
             isset($assessver['timelimit_end']) ? $assessver['timelimit_end'] : 0,
             $overtimePenalty,
@@ -2153,13 +2455,13 @@ class AssessRecord
       if ($showscores && $partattemptn[$pn] > 0 && !isset($autosave['stuans'][$pn])) {
         if ($tryToShow === 'scored' && isset($qver['scoreoverride'][$pn]) && !$this->teacherInGb) {
           $qcolors[$pn] = $qver['scoreoverride'][$pn];
-        } else if ($tryToShow === 'scored' && isset($qver['scored_try'][$pn])) {
+        } else if ($tryToShow === 'scored' && isset($qver['scored_try'][$pn]) && $qver['scored_try'][$pn] > -1) {
           $qcolors[$pn] = $qver['tries'][$pn][$qver['scored_try'][$pn]]['raw'];
         } else {
           $qcolors[$pn] = $qver['tries'][$pn][$partattemptn[$pn] - 1]['raw'];
         }
       } 
-      if ($tryToShow === 'scored' && isset($qver['scored_try'][$pn])) {
+      if ($tryToShow === 'scored' && isset($qver['scored_try'][$pn]) && $qver['scored_try'][$pn] > -1) {
         $correctAnswerWrongFormat[$pn] = 
           !empty($qver['tries'][$pn][$qver['scored_try'][$pn]]['wrongfmt']);
       } else {
@@ -2194,7 +2496,7 @@ class AssessRecord
         $useda11yalt = true;
       }
     }
-    
+
     $attemptn = (count($partattemptn) == 0) ? 0 : max($partattemptn);
     $questionParams = new QuestionParams();
     $questionParams
@@ -2208,6 +2510,7 @@ class AssessRecord
         ->setShowAnswer($showans)
         ->setShowAnswerParts($showansparts)
         ->setShowAnswerButton(true)
+        ->setNoDetailedSoln(((bool) $this->assess_info->getSetting('no_detailed_soln')) && !$force_answers)
         ->setStudentAttemptNumber($attemptn)
         ->setStudentPartAttemptCount($partattemptn)
         ->setAllQuestionAnswers($stuanswers)
@@ -2218,7 +2521,8 @@ class AssessRecord
         ->setLastRawScores($qcolors)
         ->setSeqPartDone($seqPartDone)
         ->setCorrectAnswerWrongFormat($correctAnswerWrongFormat)
-        ->setTeacherInGb($this->teacherInGb);
+        ->setTeacherInGb($this->teacherInGb)
+        ->setShowGbDetails($force_answers);
     if ($this->dispqn !== null) {
       $questionParams->setDisplayQuestionNumber($this->dispqn);
     }
@@ -2473,14 +2777,20 @@ class AssessRecord
         } else {
           if (is_numeric($try)) {
             $tryn = $try;
-          } else if ($try === 'scored' && isset($curq['scored_try'][$pn])) {
+          } else if ($try === 'scored' && isset($curq['scored_try'][$pn]) && $curq['scored_try'][$pn] > -1) {
             $tryn = $curq['scored_try'][$pn];
           } else { // last
             $tryn = max(0, count($curq['tries'][$pn]) - 1);
           }
-          $lasttry = $curq['tries'][$pn][$tryn];
-          $stuansparts[$pn] = ($lasttry['stuans'] === '') ? null : $lasttry['stuans'];
-          $stuansvalparts[$pn] = isset($lasttry['stuansval']) ? $lasttry['stuansval'] : null;
+          if (isset($curq['tries'][$pn][$tryn])) {
+            $lasttry = $curq['tries'][$pn][$tryn];
+            $stuansparts[$pn] = ($lasttry['stuans'] === '') ? null : $lasttry['stuans'];
+            $stuansvalparts[$pn] = isset($lasttry['stuansval']) ? $lasttry['stuansval'] : null;
+          } else {
+            // catch case where $tryn==-1
+            $stuansparts[$pn] = null;
+            $stuansvalparts[$pn] = null;
+          }
         }
       }
       // stuanswers array is 1-indexed
@@ -2598,6 +2908,7 @@ class AssessRecord
       $qns = range(0, count($assessver['questions']) - 1);
     }
     foreach ($qns as $qn) {
+      if ($qn === 'gen') { continue; }
       $question_versions = $assessver['questions'][$qn]['question_versions'];
       if (!$by_question || $ver === 'last') {
         $curq = $question_versions[count($question_versions) - 1];
@@ -2761,8 +3072,16 @@ class AssessRecord
         if ($by_question) {
           $curAver['questions'][$qn]['scored_version'] = $qScoredVer;
         }
-        $curAver['questions'][$qn]['score'] = round($maxQscore + 1e-8,2);
-        $curAver['questions'][$qn]['rawscore'] = round($maxQrawscore + 1e-8,4);
+        if (!empty($curAver['questions'][$qn]['drillcomplete'])) {
+          // drill was completed - full credit regardless of the underlying
+          // per-part grading of the final try (distinct from scoreoverride,
+          // which is reserved for manual teacher grade overrides)
+          $curAver['questions'][$qn]['score'] = round($points[$curQver['qid']] + 1e-8, 2);
+          $curAver['questions'][$qn]['rawscore'] = 1;
+        } else {
+          $curAver['questions'][$qn]['score'] = round($maxQscore + 1e-8,2);
+          $curAver['questions'][$qn]['rawscore'] = round($maxQrawscore + 1e-8,4);
+        }
         $curAver['questions'][$qn]['time'] = $totalQtime;
         $aVerScore += $curAver['questions'][$qn]['score'];
         $verTime += $totalQtime;
@@ -3344,10 +3663,41 @@ class AssessRecord
       }
       $out['starttime'] = $aver['starttime'];
       $out['questions'] = $this->getGbQuestionsData($qVerToGet);
+      if ($this->assess_info->getSetting('displaymethod') === 'drill') {
+        $out['drilldata'] = $this->getGbDrillData();
+      }
       $out['endmsg'] = AssessUtils::getEndMsg(
         $this->assess_info->getSetting('endmsg'),
         $aver['score'],
         $this->assess_info->getSetting('points_possible')
+      );
+      if ($this->assess_info->getSetting('singleshowwork')) {
+        [$out['swgen'], $out['swgentime']] = $this->getGenShowwork($av);
+      }
+    }
+    return $out;
+  }
+
+  /**
+   * Get per-question drill attempt history for the gradebook view.
+   * Keyed by qn, separate from getGbQuestionsData's per-version array
+   * (which GbQuestionSelect.vue relies on staying a plain numeric-indexed
+   * array) so this doesn't disturb that structure.
+   * @return array
+   */
+  public function getGbDrillData() {
+    $lastaver = count($this->data['assess_versions'])-1;
+    $out = array();
+    foreach ($this->data['assess_versions'][$lastaver]['questions'] as $qn => $qdata) {
+      $results = array();
+      foreach ($qdata['drillresults'] ?? array() as $r) {
+        $r['completed_disp'] = tzdate("n/j/y, g:i a", $r['completed']);
+        $results[] = $r;
+      }
+      $out[$qn] = array(
+        'drillresults' => $results,
+        'drillcomplete' => !empty($qdata['drillcomplete']),
+        'drillstatus' => $qdata['drillstatus'] ?? 0
       );
     }
     return $out;
@@ -3408,7 +3758,8 @@ class AssessRecord
     $qinfo = $this->data['assess_versions'][$aver]['questions'][$qn];
     $out = array(
       'scored_version' => $qinfo['scored_version'],
-      'score' => $qinfo['score']
+      'score' => $qinfo['score'],
+      'time' => $qinfo['time'] ?? 0
     );
     return $out;
   }
@@ -3665,7 +4016,7 @@ class AssessRecord
           $qdata['scoreoverride'][$pn] = floatval($score);
         }
       }
-      if (is_array($qdata['scoreoverride']) && count($qdata['scoreoverride']) == 0) {
+      if (isset($qdata['scoreoverride']) && is_array($qdata['scoreoverride']) && count($qdata['scoreoverride']) == 0) {
         unset($qdata['scoreoverride']);
       }
     }
@@ -4044,7 +4395,11 @@ class AssessRecord
       }
       for ($tn = 0; $tn < count($parttrydata); $tn++) {
         if ($qtype == 'choices') {
-          $out[$pn][] = $GLOBALS['choicesdata'][$partref][$parttrydata[$tn]['stuans']] ?? $parttrydata[$tn]['stuans'];
+          if (isset($parttrydata[$tn]['stuans']) && isset($GLOBALS['choicesdata'][$partref][$parttrydata[$tn]['stuans']])) {
+            $out[$pn][] = $GLOBALS['choicesdata'][$partref][$parttrydata[$tn]['stuans']] ?? '';
+          } else {
+            $out[$pn][] = $parttrydata[$tn]['stuans'] ?? '';
+          }
         } else if ($qtype == 'multans') {
           $pts = explode('|',$parttrydata[$tn]['stuans'] ?? '');
           $outstr = '';
@@ -4105,7 +4460,9 @@ class AssessRecord
    * @param  int $regen_penalty
    * @param  int $regen_penalty_after
    * @param  int $duedate    Original due date timestamp
-   * @param  int $exceptionpenalty
+   * @param  array $latePenaltyParams  [defaultPenalty, defaultInterval, overridePenalty,
+   *              overrideInterval, overrideScope, manualExceptionEnd] - see
+   *              AssessInfo::getLatePenaltyParams() / ExceptionFuncs::calcEffectiveLatePenaltyPct()
    * @param  array $earlybonus
    * @param  int $timelimitEnd
    * @param  int $overtimePenalty
@@ -4115,7 +4472,7 @@ class AssessRecord
    * @return float  score after penalties if $returnPenalties = false
    *         array(score, array of penalties) if $returnPenalties = true
    */
-  private function scoreAfterPenalty($score, $points, $try, $retry_penalty, $retry_penalty_after, $regen, $regen_penalty, $regen_penalty_after, $duedate, $subtime, $exceptionpenalty, $earlybonus, $timelimitEnd, $overtimePenalty, $returnPenalties = false) {
+  private function scoreAfterPenalty($score, $points, $try, $retry_penalty, $retry_penalty_after, $regen, $regen_penalty, $regen_penalty_after, $duedate, $subtime, $latePenaltyParams, $earlybonus, $timelimitEnd, $overtimePenalty, $returnPenalties = false) {
     $base = $score * $points;
     $penalties = array();
     if ($retry_penalty > 0) {
@@ -4134,10 +4491,13 @@ class AssessRecord
         $penalties[] = array('type'=>'regen', 'pct'=>$totalPenalty);
       }
     }
-    if ($exceptionpenalty > 0 && $subtime > $duedate+10) {
-      $base *= (1 - $exceptionpenalty / 100);
-      if ($base < 0) { $base = 0; }
-      $penalties[] = array('type'=>'late', 'pct'=>$exceptionpenalty);
+    if ($subtime > $duedate+10) {
+      $totalPenalty = ExceptionFuncs::calcEffectiveLatePenaltyPct($subtime, $duedate, ...$latePenaltyParams);
+      if ($totalPenalty > 0) {
+        $base *= (1 - $totalPenalty / 100);
+        if ($base < 0) { $base = 0; }
+        $penalties[] = array('type'=>'late', 'pct'=>$totalPenalty);
+      }
     }
     if ($earlybonus[0] > 0 && $subtime < $duedate - 3600 * $earlybonus[1]) {
       $base *= (1 + $earlybonus[0] / 100);
@@ -4314,6 +4674,16 @@ class AssessRecord
     $workafterCutoff = $this->getShowWorkAfterCutoff();
     $acceptWorkAfter = ($workafterCutoff == 0 || $this->now < $workafterCutoff + 30);
     foreach ($work as $qn=>$val) {
+      if ($qn === 'gen') {
+        $newwork = Sanitize::incomingHtml($val, true, 30000);
+        if (!isset($assessver['swgen']) || $assessver['swgen'] != $newwork) {
+            $assessver['swgen'] = $newwork;
+            $assessver['swgentime'] = time() - $this->assessRecord['starttime'];
+        } else {
+            unset($work[$qn]);
+        }
+        continue;
+      }
       $question_versions = &$assessver['questions'][$qn]['question_versions'];
       $curq = &$question_versions[count($question_versions) - 1];
       if ($during || 
@@ -4333,6 +4703,27 @@ class AssessRecord
     }
     return true;
   }
+
+  /*
+   * Gets time next retake is allowed. 0 if not applicable
+   */
+  public function getNextRetaketime() {
+    $retakewait = $this->assess_info->getSetting('retakewait');
+    if ($retakewait == 0 ||
+      $this->assess_info->getSetting('submitby') == 'by_question' ||
+      $this->hasUnsubmittedAttempt() ||
+      empty($this->data['assess_versions'])
+    ) {
+      return 0;
+    }
+    $cntatt = count($this->data['assess_versions']);
+    if ($cntatt > 0) {
+      return $this->data['assess_versions'][$cntatt-1]['lastchange'] +
+        $retakewait*60*60;
+    }
+    return 0;
+  }
+
   /**
    * Record a try on a question
    * @param  int $qn      Question number
@@ -4422,6 +4813,9 @@ class AssessRecord
 
     foreach ($qdata['tries'] as $pn=>$parttries) {
       if (!isset($parttries[0]['raw'])) { // no scored try on this part; don't record
+        return;
+      }
+      if (!isset($qdata['answeights'][$pn])) { // no answeight; q changed?; don't record
         return;
       }
       $firstTry = $parttries[0];

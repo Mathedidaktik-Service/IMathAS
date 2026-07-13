@@ -165,11 +165,13 @@ $include_from_assess_info = array(
   'name', 'submitby', 'enddate', 'available', 'can_use_latepass', 'hasexception',
   'original_enddate', 'extended_with', 'latepasses_avail', 'points_possible',
   'latepass_extendto', 'latepass_enddate', 'allowed_attempts', 'keepscore', 'timelimit', 'ver',
-  'scoresingb', 'viewingb', 'latepass_status', 'help_features', 'attemptext'
+  'scoresingb', 'viewingb', 'latepass_status', 'help_features', 'attemptext',
+  'displaymethod', 'drillsettings'
 );
 if ($_REQUEST['loadtexts'] == 1) {
     $include_from_assess_info[] = 'intro';
     $include_from_assess_info[] = 'interquestion_text';
+    $include_from_assess_info[] = 'resources';
 }
 $assessInfoOut = $assess_info->extractSettings($include_from_assess_info);
 
@@ -189,9 +191,11 @@ if ($isstudent) {
   if ($assessInfoOut['viewingb'] === 'immediately' ||
     ($assessInfoOut['submitby'] === 'by_assessment' && $assessInfoOut['viewingb'] == 'after_take')
   ) {
-    // non-blocking views are ones where answers aren't showing
+    // non-blocking views are ones where answers aren't showing or can't resume
+    // after_take and manual don't block, since presumably instructor chose to let them
+    // view answers before retaking
     $ansingb = $assess_info->getSetting('ansingb');
-    if ($ansingb === 'never' || $ansingb === 'after_take') {
+    if ($ansingb === 'never' || $ansingb === 'after_take' || $ansingb === 'manual') {
       $LPblockingView = false;
     } else if ($ansingb === 'after_due' && $now < $assessInfoOut['enddate']) {
       $LPblockingView = false;

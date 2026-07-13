@@ -78,6 +78,14 @@ if ($localuserid === false) {
         }
       } else {
         $err = _('Existing username or password is not valid');
+        if (isset($CFG['cloudwatch_loginlog'])) {
+            require_once __DIR__.'/../includes/CloudWatchLogger.php';
+            addLoginLog('login_failure', $tmpuserid, [
+                'reason' => 'bad_pw',
+                'via' => 'LTI1.3',
+                'ltiuser' => [$ltiuserid, $platform_id]
+            ]);
+        }
         unset($tmpuserid);
       }
     }
@@ -164,7 +172,18 @@ if ($localuserid === false) {
 
 // We have a local userid, so log them in.
 if (isset($_SESSION['userid']) && $_SESSION['userid'] != $localuserid) {
-    $_SESSION = [];
+  // had existing session, but doesn't match connection userid, so reset session
+  $_SESSION = [];
+} 
+if (!isset($_SESSION['userid'])) {
+  // new login
+  if (isset($CFG['cloudwatch_loginlog'])) {
+      require_once __DIR__.'/../includes/CloudWatchLogger.php';
+      addLoginLog('login_success', $localuserid, [
+          'via' => 'LTI1.3',
+          'ltiuser' => [$ltiuserid, $platform_id]
+      ]);
+  }
 }
 $_SESSION['lti_user_id'] = $ltiuserid;
 $_SESSION['userid'] = $localuserid;
@@ -219,7 +238,7 @@ if ($role == 'Instructor' && $localcourse === null) {
   if ($launch->is_deep_link_launch() && $role == 'Instructor') {
     require_once __DIR__.'/deep_link_form.php';
     deep_link_form($launch, $localuserid, $localcourse, $db);
-  } else if ($launch->is_submission_review_launch()) {
+  } else if ($launch->is_submission_review_launch() || strpos($launch->get_target_link(), 'submissionreview=')!==false) {
     require_once __DIR__.'/submissionlink.php';
     link_to_submission($launch, $localuserid, $localcourse, $db);
   } else if ($launch->is_resource_launch()) {

@@ -55,9 +55,33 @@ if ($myrights<20) {
 	$curBreadcrumb = "<a href=\"../index.php\">Home</a>";
 	if ($isadmin || $isgrpadmin) {
 		$curBreadcrumb .= " &gt; <a href=\"../admin/admin2.php\">Admin</a> ";
-	}
-	if ($cid!=0) {
+	} else if ($cid!=0) {
 		$curBreadcrumb .= " &gt; <a href=\"course.php?cid=$cid\">".Sanitize::encodeStringForDisplay($coursename)."</a> ";
+	}
+
+	function anyWouldCreateCycle(array $libids, $newParentId) {
+		global $CFG,$DBH;
+		if (isset($CFG['MySQL_ver']) && $CFG['MySQL_ver'] >= 8) {
+			$placeholders = Sanitize::generateQueryPlaceholders($libids);
+			
+			 // Check: is newParentId a descendant of any libid?
+			$sql2 = "
+				WITH RECURSIVE descendants AS (
+					SELECT id FROM imas_libraries WHERE id IN ($placeholders)
+					UNION ALL
+					SELECT l.id FROM imas_libraries l
+					INNER JOIN descendants d ON l.parent = d.id
+				)
+				SELECT id FROM descendants WHERE id = ?
+			";
+			$stmt = $DBH->prepare($sql2);
+			$stmt->execute([...$libids, $newParentId]);
+			$descendantHits = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+			return !empty($descendantHits);
+		} else {
+			return false;
+		}
 	}
 
 	$checkedLibraries = [];
@@ -328,6 +352,10 @@ if ($myrights<20) {
 						$toset[] = $alib;
 					}
 				}
+				if (anyWouldCreateCycle($toset, $_POST['parentlib'])) {
+					echo 'New parent would create cyclical library; aborting';
+					exit;
+				} 
 				if (count($toset)>0) {
 					$parlist = implode(',', array_map('intval',$toset));
 					$query = "UPDATE imas_libraries SET parent=:parent,lastmoddate=:lastmoddate WHERE id IN ($parlist)";
@@ -422,6 +450,11 @@ if ($myrights<20) {
 					exit;
 				}
 			} else {
+				if ($_GET['modify'] != $_POST['parentlib'] && anyWouldCreateCycle([$_GET['modify']], $_POST['parentlib'])) {
+					echo 'New parent would create cyclical library; aborting';
+					exit;
+				}
+				
 				$query = "UPDATE imas_libraries SET name=:name,userights=:userights,sortorder=:sortorder,lastmoddate=:lastmoddate";
 				$qarr = array(':name'=>$_POST['name'], ':userights'=>$_POST['rights'], ':sortorder'=>$_POST['sortorder'], ':lastmoddate'=>$now, ':id'=>$_GET['modify']);
 				if ($_GET['modify'] != $_POST['parentlib']) {

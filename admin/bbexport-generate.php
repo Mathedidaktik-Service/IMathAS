@@ -13,6 +13,11 @@ $loadgraphfilter = 1;
 require_once "../includes/filehandler.php";
 require_once "../filter/filter.php";
 require_once "bbexport-templates.php";
+require_once "../includes/courselinkinc.php";
+
+if (!empty($CFG['GEN']['mathimgurlexport'])) {
+	$mathimgurl = $CFG['GEN']['mathimgurlexport'];
+}
 if (substr($mathimgurl,0,4) !== 'http') {
     // need to make an absolute url
     if (strlen($imasroot) > 0) { 
@@ -121,6 +126,7 @@ if (substr($mathimgurl,0,4)!='http' && isset($GLOBALS['basesiteurl'])) {
 	$mathimgurl = substr($GLOBALS['basesiteurl'],0,-1*strlen($imasroot)). $mathimgurl;
 }
 function filtercapture($str) {
+	$str = stripCourseLinks($str);
 	$str = forcefiltermath($str);
 	$str = forcefiltergraphnofile($str);
 	return $str;

@@ -35,15 +35,15 @@ class Sanitize
 		'.zip', '.rar',  '.7z',   '.gz',   
 		'.mp4', '.mov',  '.mkv',  '.mp3',  '.m4a',  '.vtt',  '.srt',
 		'.nb',  '.nbp',  '.mw',   '.mws',  '.m',    '.mat',  '.mlx',   '.omv',
-		'.sas', '.sav',  '.r',    '.rda',  '.rds',  '.dta',  '.rdata', '.rmd',  
+		'.sas', '.sav',  '.r',    '.rda',  '.rds',  '.dta',  '.rdata', '.rmd', '.spv',
 		'.sps', '.qmd',  '.mpx',  '.mpj',  '.mwx',  '.mtw',  '.jmp',   '.jrn', '.jrp', 
-		'.dat',  '.json', 
+		'.dat',  '.json', '.jasp',
 		'.imas', '.imscc', '.ggb',
 		'.ipynb', '.pages', '.numbers'
 	];
 
 	private static $whitelistedNonlocalExtensions = [
-		'.htm', '.html', '.js', '.xml', '.xhtml'
+		'.htm', '.html', '.js', '.xml', '.xhtml', '.py', '.java'
 	];
 
 	/**

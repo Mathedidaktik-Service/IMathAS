@@ -173,15 +173,11 @@ if ($haslogin && !$hasusername) {
 
         $_POST['usedetected'] = true;
     } else {
-        $query = "SELECT id,password,rights,groupid";
-        if (strpos(basename($_SERVER['PHP_SELF']), 'upgrade.php') === false) {
-            $query .= ',jsondata,mfa';
-        }
-        $query .= " FROM imas_users WHERE SID=:SID";
+        $query = "SELECT id,password,rights,groupid,jsondata,mfa FROM imas_users WHERE SID=:SID";
         $stm = $DBH->prepare($query);
         $stm->execute(array(':SID' => $_POST['username']));
         $line = $stm->fetch(PDO::FETCH_ASSOC);
-        if ($line != false && isset($line['jsondata'])) {
+        if ($line != false) {
             $json_data = json_decode($line['jsondata'], true);
             if (isset($json_data['login_blockuntil']) && time() < $json_data['login_blockuntil']) {
                 echo _('Too many invalid logins - please wait a minute before trying again, or use the forgot password link to reset your password');
@@ -283,6 +279,10 @@ if ($haslogin && !$hasusername) {
         unset($loginmfaverified);
         unset($_SESSION['challenge']); //challenge is used up - forget it.
 
+        if (isset($CFG['cloudwatch_loginlog'])) {
+            require_once __DIR__.'/includes/CloudWatchLogger.php';
+            addLoginLog('login_success', $userid);
+        }
         //call hook, if defined
         if (function_exists('onLogin')) {
             onLogin();
@@ -337,6 +337,17 @@ if ($haslogin && !$hasusername) {
             }
             $stm = $DBH->prepare("UPDATE imas_users SET jsondata=:jsondata WHERE id=:id");
             $stm->execute(array(':jsondata' => json_encode($json_data), ':id' => $line['id']));
+            if (isset($CFG['cloudwatch_loginlog'])) {
+                require_once __DIR__.'/includes/CloudWatchLogger.php';
+                if ($badsession) {
+                    $reason = 'bad_session';
+                } else if ($_SESSION['challenge'] != ($_POST['challenge'] ?? '')) {
+                    $reason = 'bad_challenge';
+                } else {
+                    $reason = 'bad_pw';
+                }
+                addLoginLog('login_failure', $line['id'], ['reason' => $reason]);
+            }
         }
         /*  For login error tracking - requires add'l table
     if ($line==null) {
@@ -551,7 +562,7 @@ if ($hasusername) {
                 'index.php', 'gbviewassess.php', 'autosave.php', 'endassess.php', 'getscores.php', 'livepollstatus.php', 'loadassess.php',
                 'loadquestion.php', 'scorequestion.php', 'startassess.php', 'uselatepass.php', 'gbloadassess.php', 'gbloadassessver.php',
                 'gbloadquestionver.php', 'getquestions.php', 'savework.php', 'posts.php', 'thread.php', 'postsbyname.php',
-                'savetagged.php', 'recordlikes.php', 'listlikes.php', 'gbloadtexts.php', 'rectrack.php');
+                'savetagged.php', 'recordlikes.php', 'listlikes.php', 'gbloadtexts.php', 'rectrack.php', 'submissionreview.php');
             //call hook, if defined
             if (function_exists('allowedInAssessment')) {
                 $allowedinLTI = array_merge($allowedinLTI, allowedInAssessment());
@@ -597,12 +608,13 @@ if ($hasusername) {
         } else {
             $cid = Sanitize::courseId($_SESSION['courseid']);
         }
-        $stm = $DBH->prepare("SELECT id,locked,timelimitmult,section,latepass,lastaccess,lticourseid,lockaid FROM imas_students WHERE userid=:userid AND courseid=:courseid");
+        $stm = $DBH->prepare("SELECT id,locked,timelimitmult,latepassmult,section,latepass,lastaccess,lticourseid,lockaid FROM imas_students WHERE userid=:userid AND courseid=:courseid");
         $stm->execute(array(':userid' => $userid, ':courseid' => $cid));
         $line = $stm->fetch(PDO::FETCH_ASSOC);
         if ($line != false) {
             $studentid = $line['id'];
             $studentinfo['timelimitmult'] = $line['timelimitmult'];
+            $studentinfo['latepassmult'] = $line['latepassmult'];
             $studentinfo['section'] = $line['section'];
             $studentinfo['latepasses'] = $line['latepass'];
             $studentinfo['lockaid'] = $line['lockaid'];
@@ -656,7 +668,7 @@ if ($hasusername) {
                         $stm = $DBH->prepare("INSERT INTO imas_students (userid,courseid) VALUES (?,?)");
                         $stm->execute(array($userid, $cid));
                         $studentid = $DBH->lastInsertId();
-                        $studentinfo = array('latepasses' => 0, 'timelimitmult' => 1, 'section' => null);
+                        $studentinfo = array('latepasses' => 0, 'timelimitmult' => 1, 'latepassmult' => 1, 'section' => null);
                     } else {
                         echo '<p>' . _('This course does not allow guest access.') . '</p>';
                         exit;
@@ -665,7 +677,7 @@ if ($hasusername) {
             }
         }
         $query = "SELECT imas_courses.name,imas_courses.available,imas_courses.lockaid,imas_courses.copyrights,imas_users.groupid,imas_courses.theme,imas_courses.newflag,imas_courses.msgset,imas_courses.toolset,imas_courses.deftime,imas_courses.latepasshrs,imas_courses.startdate,imas_courses.enddate,imas_courses.UIver ";
-        $query .= "FROM imas_courses JOIN imas_users ON imas_users.id=imas_courses.ownerid WHERE imas_courses.id=:id";
+        $query .= "FROM imas_courses LEFT JOIN imas_users ON imas_users.id=imas_courses.ownerid WHERE imas_courses.id=:id";
         $stm = $DBH->prepare($query);
         $stm->execute(array(':id' => $cid));
         if ($stm->rowCount() > 0) {
@@ -693,7 +705,7 @@ if ($hasusername) {
                 $coursedefstime = $coursedeftime;
             }
             $courseenddate = $crow['enddate'];
-            $latepasshrs = max(1,$crow['latepasshrs']);
+            $latepasshrs = max(1,$crow['latepasshrs']) * ($studentinfo['latepassmult'] ?? 1);
             $courseUIver = $crow['UIver'];
 
             if (isset($studentid) && !$inInstrStuView) {

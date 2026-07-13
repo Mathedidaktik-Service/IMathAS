@@ -35,12 +35,19 @@ class QuestionParams
     // Orig: $showhints - boolean, from displayq2.php
     private $showHints;
 
+    // Whether to suppress the detailed solution when showing answers.
+    private $noDetailedSoln = false;
+
     // These must made available to the question code to be eval'd.
     // Orig: $scorenonzero - hashmap, from macros.php:getscorenonzero() - Used in question eval.
     private $scoreNonZero;
     // Orig: $scoreiscorrect - hashmap, from macros.php:getiscorrect() - Used in question eval.
     private $scoreIsCorrect;
     private $teacherInGb = false;
+    // Whether correct answers are being shown (teacher in gb, or student
+    // after answers have been released) - enables detailed per-item
+    // correctness markup for multi-part answer boxes (matching, etc).
+    private $showGbDetails = false;
 
     /**
      * Get the question's database row ID from imas_questionset.
@@ -472,6 +479,28 @@ class QuestionParams
     }
 
     /**
+     * Whether the detailed solution should be suppressed when showing answers.
+     *
+     * @return bool
+     */
+    public function getNoDetailedSoln(): bool
+    {
+        return $this->noDetailedSoln;
+    }
+
+    /**
+     * Whether the detailed solution should be suppressed when showing answers.
+     *
+     * @param bool $noDetailedSoln
+     * @return QuestionParams
+     */
+    public function setNoDetailedSoln(bool $noDetailedSoln): QuestionParams
+    {
+        $this->noDetailedSoln = $noDetailedSoln;
+        return $this;
+    }
+
+    /**
      * Get the value calculated by macros.php:getscorenonzero(). This is used
      * during question code eval.
      *
@@ -582,6 +611,30 @@ class QuestionParams
     public function setTeacherInGb(bool $teacherInGb): QuestionParams
     {
         $this->teacherInGb = $teacherInGb;
+        return $this;
+    }
+
+    /**
+     * Get whether correct answers are being shown, so answer boxes can
+     * include detailed per-item correctness markup.
+     *
+     * @return bool
+     */
+    public function getShowGbDetails(): bool
+    {
+        return $this->showGbDetails;
+    }
+
+    /**
+     * Set whether correct answers are being shown, so answer boxes can
+     * include detailed per-item correctness markup.
+     *
+     * @param bool $showGbDetails
+     * @return QuestionParams
+     */
+    public function setShowGbDetails(bool $showGbDetails): QuestionParams
+    {
+        $this->showGbDetails = $showGbDetails;
         return $this;
     }
 }

@@ -36,12 +36,14 @@
 <script>
 import Icons from '@/components/widgets/Icons.vue';
 import { store, actions } from '@/basicstore';
+import { drillGoalMixin } from '@/mixins/drillGoalMixin';
 
 export default {
   name: 'SettingsList',
   components: {
     Icons
   },
+  mixins: [drillGoalMixin],
   data: function () {
     return {
       now: new Date()
@@ -75,11 +77,22 @@ export default {
         if (settings.timelimit > 0) {
           out.push(this.getTimelimitObj());
         }
+
+        // drill goal
+        if (settings.displaymethod === 'drill') {
+          out.push(this.getDrillObj());
+        }
       }
       return out;
     }
   },
   methods: {
+    getDrillObj () {
+      return {
+        icon: 'info',
+        str: this.drillGoalLabel(store.assessInfo.drillsettings)
+      };
+    },
     getPointsObj () {
       var settings = store.assessInfo;
       var pointsobj = {
@@ -106,12 +119,31 @@ export default {
         } else {
           dateobj.sub += ' ' + this.$t('setlist-extension');
         }
-        if (settings.exceptionpenalty > 0) {
+        if (settings.active_late_penalty && settings.active_late_penalty.penalty > 0) {
           const now = new Date().getTime();
+          const activePenalty = settings.active_late_penalty.penalty;
+          const activeInterval = settings.active_late_penalty.interval;
           if (settings.original_enddate * 1000 > now) {
-            dateobj.alert2 = this.$t('setlist-penalty_after', { p: settings.exceptionpenalty, date: settings.original_enddate_disp });
+            // not yet late - describe the rate that will apply once late
+            if (activeInterval > 0) {
+              dateobj.alert2 = this.$t('setlist-penalty_interval_after', {
+                p: activePenalty,
+                hrs: activeInterval,
+                date: settings.original_enddate_disp
+              });
+            } else {
+              dateobj.alert2 = this.$t('setlist-penalty_after', { p: activePenalty, date: settings.original_enddate_disp });
+            }
+          } else if (activeInterval > 0) {
+            // already late - current_late_penalty_pct is computed server-side since it may
+            // combine an earlier exception-only override with the assessment's default policy
+            dateobj.alert2 = this.$t('setlist-penalty_interval', {
+              p: activePenalty,
+              hrs: activeInterval,
+              cur: settings.current_late_penalty_pct
+            });
           } else {
-            dateobj.alert2 = this.$t('setlist-penalty', { p: settings.exceptionpenalty });
+            dateobj.alert2 = this.$t('setlist-penalty', { p: settings.current_late_penalty_pct });
           }
         }
       }
@@ -129,7 +161,7 @@ export default {
     },
     getAttemptsObj () {
       var settings = store.assessInfo;
-      var mainstr, attemptsLeftStr, substr, alertstr;
+      var mainstr, attemptsLeftStr, substr, alertstr, alert2str;
 
       var attemptsLeft = settings.allowed_attempts - settings.prev_attempts.length;
       let altstr = '';
@@ -173,12 +205,17 @@ export default {
         alertstr = this.$t('setlist-retake_penalty', { p: penalty });
       }
 
+      if (settings.retakewait) {
+        alert2str = this.$t('setlist-retakewait', { n: settings.retakewait });
+      }
+
       return {
         icon: 'retake',
         str: mainstr,
         altstr: altstr,
         sub: substr,
-        alert: alertstr
+        alert: alertstr,
+        alert2: alert2str
       };
     },
     getTimelimitObj () {

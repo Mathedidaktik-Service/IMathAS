@@ -21,6 +21,16 @@ function getvideoid($url) {
 			$vidid = substr($vidid,0,strpos($vidid,'#'));
 		}
 		$vidid = str_replace(array(" ","\n","\r","\t"),'',$vidid);
+	} else if (strpos($url,'youtube.com/embed/')!==false) {
+		//youtube
+		$vidid = substr($url,strpos($url,'/embed/')+7);
+		if (strpos($vidid,'#')!==false) {
+			$vidid = substr($vidid,0,strpos($vidid,'#'));
+		}
+		if (strpos($vidid,'?')!==false) {
+			$vidid = substr($vidid,0,strpos($vidid,'?'));
+		}
+		$vidid = str_replace(array(" ","\n","\r","\t"),'',$vidid);
 	} else if (strpos($url,'youtu.be/')!==false) {
 		//youtube
 		$vidid = substr($url,strpos($url,'.be/')+4);
@@ -56,7 +66,10 @@ function getCaptionDataByVidId($vidid) {
         $ctx = stream_context_create(array('http'=>array('timeout' => 1)));
         $resp = @file_get_contents('https://youtube.googleapis.com/youtube/v3/captions?part=snippet&videoId='.Sanitize::encodeUrlParam($vidid).'&key='.Sanitize::encodeUrlParam($CFG['YouTubeAPIKey']), false, $ctx);
         if ($resp === false) {
-            $code = explode(' ', $http_response_header[0])[1];
+            if (function_exists('http_get_last_response_headers')) {
+                $http_response_header = http_get_last_response_headers(); // PHP 8.4+
+            }
+            $code = explode(' ', $http_response_header[0] ?? '')[1] ?? '';
             if ($code == '404') {
                 $query = "INSERT INTO imas_captiondata (vidid, captioned, status, lastchg) VALUES (?,0,3,?) ";
                 $query .= "ON DUPLICATE KEY UPDATE status=IF(status=0 OR status=3,VALUES(status),status),";

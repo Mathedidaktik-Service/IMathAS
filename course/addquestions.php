@@ -39,7 +39,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 	$stm = $DBH->prepare("SELECT courseid,ver,submitby FROM imas_assessments WHERE id=?");
 	$stm->execute(array($aid));
 	$row = $stm->fetch(PDO::FETCH_ASSOC);
-	if ($row === null || $row['courseid'] != $cid) {
+	if ($row === false || $row['courseid'] != $cid) {
 		echo _("Invalid ID");
 		exit;
 	} else if ($row['ver'] > 1) {
@@ -873,7 +873,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 					}
 
 				}
-				if ($searchall==1) {
+				//if ($searchall==1) {
 					$query .= " LIMIT 300";
 					$offset = 0;
 					if (isset($_REQUEST['offset'])) {
@@ -882,7 +882,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 							$query .= " OFFSET $offset";
 						}
 					}
-				}
+				//}
 
 				if ($search=='recommend' && count($existingq)>0) {
 					$existingqlist = implode(',', array_map('intval',$existingq));  //pulled from database, so no quotes needed
@@ -1327,7 +1327,7 @@ if ($overwriteBody==1) {
 		var itemarray = <?php echo json_encode($jsarr, JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE); ?>;
 		var beentaken = <?php echo ($beentaken) ? 1:0; ?>;
         var displaymethod = "<?php echo Sanitize::encodeStringForDisplay($displaymethod); ?>";
-        var lastitemhash = "<?php echo md5($itemorder); ?>";
+        var lastitemhash = "<?php echo md5($itemorder . $assessintro); ?>";
 		//$(refreshTable);
 		refreshTable();
 	</script>
@@ -1473,7 +1473,7 @@ if ($overwriteBody==1) {
 <?php
 					}
 				}
-				if ($searchall==1 && ($searchlimited || $offset>0)) {
+				if ($searchlimited || $offset>0) {
 					echo '<tr><td></td><td><i>'._('Search cut off at 300 results');
 					echo '<br>'._('Showing ').($offset+1).'-'.($offset + 300).'. ';
 					if ($offset>0) {

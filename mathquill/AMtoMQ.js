@@ -93,6 +93,7 @@ var AMQsymbols = [
 //{input:"U",  tag:"mo", tex:"cup", ttype:CONST},
 //{input:"uuu", tag:"mo", tex:"bigcup", ttype:UNDEROVER},
 {input:"xx", tex:"times", ttype:CONST},
+{input:"setminus", tag:"mo", ttype:CONST},
 
 //binary relation symbols
 {input:"!=",  tag:"mo", tex:"ne", ttype:CONST},
@@ -104,17 +105,22 @@ var AMQsymbols = [
 //{input:"gt=",  tag:"mo", tex:"geq", ttype:CONST},
 {input:">=",  tag:"mo", tex:"ge", ttype:CONST},
 {input:"geq", tag:"mo", ttype:CONST},
-//{input:"-<",  tag:"mo", tex:"prec", ttype:CONST},
+{input:"-<",  tag:"mo", tex:"prec", ttype:CONST},
 //{input:"-lt", tag:"mo", ttype:CONST},
-//{input:">-",  tag:"mo", tex:"succ", ttype:CONST},
-//{input:"-<=", tag:"mo", tex:"preceq", ttype:CONST},
-//{input:">-=", tag:"mo", tex:"succeq", ttype:CONST},
+{input:">-",  tag:"mo", tex:"succ", ttype:CONST},
+{input:"-<=", tag:"mo", tex:"preceq", ttype:CONST},
+{input:">-=", tag:"mo", tex:"succeq", ttype:CONST},
 {input:"in",  tag:"mo", ttype:CONST},
-//{input:"!in", tag:"mo", tex:"notin", ttype:CONST},
+{input:"!in", tag:"mo", tex:"notin", ttype:CONST},
 {input:"sub", tag:"mo", tex:"subset", ttype:CONST},
-//{input:"sup", tag:"mo", tex:"supset", ttype:CONST},
+{input:"sup", tag:"mo", tex:"supset", ttype:CONST},
 {input:"sube", tag:"mo", tex:"subseteq", ttype:CONST},
-//{input:"supe", tag:"mo", tex:"supseteq", ttype:CONST},
+{input:"supe", tag:"mo", tex:"supseteq", ttype:CONST},
+{input:"-=",  tag:"mo", output:"\u2261", tex:"equiv", ttype:CONST},
+{input:"~=",  tag:"mo", output:"\u2245", tex:"cong", ttype:CONST},
+{input:"~~",  tag:"mo", output:"\u2248", tex:"approx", ttype:CONST},
+{input:"prop", tag:"mo", output:"\u221D", tex:"propto", ttype:CONST},
+{input:"~",  tag:"mo", output:"~", tex:"sim", ttype:CONST},
 
 //grouping brackets
 {input:"(", tag:"mo", output:"(", ttype:LEFTBRACKET},
@@ -129,8 +135,8 @@ var AMQsymbols = [
 {input:":)", tag:"mo", tex:"rangle", ttype:RIGHTBRACKET},
 {input:"<<", tag:"mo", tex:"langle", ttype:LEFTBRACKET},
 {input:">>", tag:"mo", tex:"rangle", ttype:RIGHTBRACKET},
-{input:"{:", tag:"mo", output:"{:", ttype:LEFTBRACKET, invisible:true},
-{input:":}", tag:"mo", output:":}", ttype:RIGHTBRACKET, invisible:true},
+{input:"{:", tag:"mo", tex:"linvis", ttype:LEFTBRACKET},
+{input:":}", tag:"mo", tex:"rinvis", ttype:RIGHTBRACKET},
 
 //miscellaneous symbols
 {input:"int",  tag:"mo", ttype:CONST},
@@ -141,12 +147,16 @@ var AMQsymbols = [
 {input:"->",   tag:"mo", tex:"to", ttype:CONST},
 {input:"=>",  tag:"mo", tex:"implies", ttype:CONST},
 {input:"<=>", tag:"mo", tex:"iff", ttype:CONST},
+{input:"lArr", tag:"mo", tex:"Leftarrow", ttype:CONST},
+{input:"rArr", tag:"mo", tex:"Rightarrow", ttype:CONST},
+{input:"larr", tag:"mo", tex:"leftarrow", ttype:CONST},
+{input:"harr", tag:"mo", tex:"leftrightarrow", ttype:CONST},
 {input:"rightleftharpoons", tag:"mo", ttype:CONST},
-//{input:"CC",  tag:"mo", tex:"mathbb{C}", ttype:CONST, notexcopy:true},
-//{input:"NN",  tag:"mo", tex:"mathbb{N}", ttype:CONST, notexcopy:true},
-//{input:"QQ",  tag:"mo", tex:"mathbb{Q}", ttype:CONST, notexcopy:true},
+{input:"CC",  tag:"mo", tex:"mathbb{C}", ttype:CONST, notexcopy:true},
+{input:"NN",  tag:"mo", tex:"mathbb{N}", ttype:CONST, notexcopy:true},
+{input:"QQ",  tag:"mo", tex:"mathbb{Q}", ttype:CONST, notexcopy:true},
 {input:"RR",  tag:"mo", tex:"mathbb{R}", ttype:CONST, notexcopy:true},
-//{input:"ZZ",  tag:"mo", tex:"mathbb{Z}", ttype:CONST, notexcopy:true},
+{input:"ZZ",  tag:"mo", tex:"mathbb{Z}", ttype:CONST, notexcopy:true},
 {input:"f",   tag:"mi", output:"f",      ttype:UNARY, func:true, val:true},
 //{input:"g",   tag:"mi", output:"g",      ttype:UNARY, func:true, val:true},
 //{input:"''", tag:"mo", output:"''", val:true},
@@ -154,6 +164,8 @@ var AMQsymbols = [
 //{input:"''''", tag:"mo", output:"''''", val:true},
 {input:"degree",  tag:"mo", ttype:CONST},
 {input:"degrees", output:"degree", ttype:DEFINITION},
+{input:"AA",  tag:"mo", tex:"forall", ttype:CONST},
+{input:"EE",  tag:"mo", tex:"exists", ttype:CONST},
 
 
 //standard functions
@@ -178,6 +190,9 @@ var AMQsymbols = [
 {input:"log",  tag:"mo", ttype:UNARY, func:true},
 {input:"ln",   tag:"mo",  ttype:UNARY, func:true},
 {input:"abs",   tag:"mo",  ttype:UNARY},
+{input:"norm",   tag:"mo",  ttype:UNARY},
+
+{input:"innerfield", tag:"mo", output:"MathQuillMathField", ttype:UNARY},
 
 {input:"Sin",  tag:"mo", output:"sin", ttype:UNARY, func:true},
 {input:"Cos",  tag:"mo", output:"cos", ttype:UNARY, func:true},
@@ -195,19 +210,27 @@ var AMQsymbols = [
 {input:"Ln",   tag:"mo", output:"ln",  ttype:UNARY, func:true},
 {input:"Abs",   tag:"mo", output:"abs",  ttype:UNARY, func:true},
 
+{input:"int",  tag:"mo", output:"\u222B", tex:null, ttype:CONST},
+{input:"...",  tag:"mo", output:"...",    tex:"ldots", ttype:CONST},
+{input:"del",  tag:"mo", output:"\u2202", tex:"partial", ttype:CONST},
+{input:"grad", tag:"mo", output:"\u2207", tex:"nabla", ttype:CONST},
+
 //commands with argument
 AMQsqrt, AMQroot, AMQfrac, AMQdiv, AMQover, AMQsub, AMQsup,
 {input:"Sqrt", tag:"msqrt", output:"sqrt", ttype:UNARY},
 {input:"hat", tag:"mover", ttype:UNARY, acc:true},
 {input:"bar", tag:"mover", tex:"overline", ttype:UNARY, acc:true},
 {input:"vec", tag:"mover", ttype:UNARY, acc:true},
-//{input:"tilde", tag:"mover", output:"~", ttype:UNARY, acc:true},
-//{input:"dot", tag:"mover", output:".",      ttype:UNARY, acc:true},
-//{input:"ddot", tag:"mover", output:"..",    ttype:UNARY, acc:true},
+{input:"tilde", tag:"mover", ttype:UNARY, acc:true},
+{input:"dot", tag:"mover",  ttype:UNARY, acc:true},
+{input:"mathbb", tag:"mstyle", ttype:UNARY},
+{input:"ddot", tag:"mover", ttype:UNARY, acc:true},
 //{input:"ul", tag:"munder", tex:"underline", ttype:UNARY, acc:true},
 AMQtext, AMQmbox, AMQquote
 //{input:"var", tag:"mstyle", atname:"fontstyle", atval:"italic", output:"var", ttype:UNARY},
 //{input:"color", tag:"mstyle", ttype:BINARY}
+
+
 ];
 
 function compareNames(s1,s2) {
@@ -413,6 +436,7 @@ function AMQTparseSexpr(str) { //parses str and returns [node,tailstr]
   case UNDEROVER:
   case CONST:
     str = AMQremoveCharsAndBlanks(str,symbol.input.length);
+
      var texsymbol = AMQTgetTeXsymbol(symbol);
      if (texsymbol.charAt(0)=="\\" || symbol.tag=="mo") return [texsymbol,str];
      else return ['{'+texsymbol+'}',str];
@@ -495,6 +519,8 @@ function AMQTparseSexpr(str) { //parses str and returns [node,tailstr]
 	      return ['\\sqrt{'+result[0]+'}',result[1]];
       } else if (symbol.input == "abs") {           // sqrt
 	      return ['\\left|{'+result[0]+'}\\right|',result[1]];
+      } else if (symbol.input == "norm") {           // sqrt
+	      return ['\\left\\lVert{'+result[0]+'}\\right\\rVert',result[1]];
       } else if (symbol.input == "cancel") {           // cancel
 	      return ['\\cancel{'+result[0]+'}',result[1]];
       } else if (typeof symbol.rewriteleftright != "undefined") {  // abs, floor, ceil
@@ -503,7 +529,7 @@ function AMQTparseSexpr(str) { //parses str and returns [node,tailstr]
 	      //return ['{'+AMQTgetTeXsymbol(symbol)+'{'+result[0]+'}}',result[1]];
 	      return [AMQTgetTeXsymbol(symbol)+'{'+result[0]+'}',result[1]];
       } else {                        // font change command
-	    return ['{'+AMQTgetTeXsymbol(symbol)+'{'+result[0]+'}}',result[1]];
+	      return ['{'+AMQTgetTeXsymbol(symbol)+'{'+result[0]+'}}',result[1]];
       }
   case BINARY:
     str = AMQremoveCharsAndBlanks(str,symbol.input.length);
@@ -635,7 +661,7 @@ function AMQTparseExpr(str,rightbracket) {
 		if (right==')' || right==']') {
 			var left = newFrag.charAt(6);
 			if ((left=='(' && right==')' && symbol.output != '}') || (left=='[' && right==']')) {
-				var mxout = '\\begin{bmatrix}';
+				var mxout = '\\begin{matrix}';
 				var pos = new Array(); //position of commas
 				pos.push(0);
 				var matrix = true;
@@ -696,7 +722,7 @@ function AMQTparseExpr(str,rightbracket) {
 						mxout += subarr.join('&');
 					}
 				}
-				mxout += '\\end{bmatrix}';
+				mxout += '\\end{matrix}';
 				if (matrix) { newFrag = mxout;}
 			}
 		}
@@ -749,6 +775,7 @@ return function(str,elid,nomatrices) {
 	  return "";
   }
   var out = AMQTparseExpr(str.replace(/^\s+/g,""),false)[0];
+  out = out.replace(/mathbb{{{(.*?)}}}/g, 'mathbb{$1}');
   out = out.replace(/{(\d+)}(?={\d+})/g, '{$1}\\ ');
   return out;
 }
@@ -786,35 +813,58 @@ function MQtoAM(tex,display) {
 		tex = tex.replace(/\\varnothing/g,'DNE');
 		tex = tex.replace(/\\Re/g,'all real numbers');
 	} else {
-		tex = tex.replace(/\\Re/g,'RR');
+		tex = tex.replace(/\\Re/g,' RR ');
+    tex = tex.replace(/\\varnothing/g,' \\emptyset ');
+    tex = tex.replace(/\\mathbb{([RCNZQ])}/g,' $1$1 ');
 	}
-  tex = tex.replace(/\\begin{.?matrix}(.*?)\\end{.?matrix}/g, function(m, p) {
+  while ((i = tex.lastIndexOf('\\left\\lVert'))!=-1) { //found a left ||)
+    rb = tex.indexOf('\\right\\rVert',i+1);
+    if (rb!=-1) {  //have a right ||  - replace with norm( )
+      // if sin||x||, conver to sin(norm(x))
+      isfuncleft = false;
+      if (!display) {
+        isfuncleft = tex.substring(0,i).match(/(arcsinh|arccosh|arctanh|arcsech|arccsch|arccoth|arcsin|arccos|arctan|arcsec|arccsc|arccot|sinh|cosh|tanh|sech|csch|coth|ln|log|exp|sin|cos|tan|sec|csc|cot)(\^\d+)?$/);
+      }
+      tex = tex.substring(0,rb) + ")" + (isfuncleft?')':'') + tex.substring(rb+12);
+      tex = tex.substring(0,i) + (isfuncleft?'(':'') + "norm(" + tex.substring(i+11);
+    } else {
+      tex = tex.substring(0,i) + "||" + tex.substring(i+11);
+    }
+  }
+  tex = tex.replace(/\\begin{bmatrix}(.*?)\\end{bmatrix}/g, function(m, p) {
     return '[(' + p.replace(/\\\\/g,'),(').replace(/&/g,',') + ')]';
   });
-	tex = tex.replace(/\\le(?=(\b|\d))/g,'<=');
-	tex = tex.replace(/\\ge(?=(\b|\d))/g,'>=');
-  tex = tex.replace(/\\ne(?=(\b|\d))/g,'!=');
-  tex = tex.replace(/\+\-/g,'+ -'); // ensure spacing so it doesn't interpret as +-
-  tex = tex.replace(/\\pm/g,'+-');
-	tex = tex.replace(/\\approx/g,'~~');
-	tex = tex.replace(/(\\arrow|\\rightarrow)/g,'rarr');
-    tex = tex.replace(/\\rightleftharpoons/g,'rightleftharpoons');
+  tex = tex.replace(/\\left(\\{|\[|\(|\\linvis|\.|\|)\\begin{matrix}(.*?)\\end{matrix}\\right(\\}|\]|\)|\\rinvis|\.|\|)/g, function(m, lb, p, rb) {
+    lb = lb.replace(/(\.)/,'\\linvis');
+    rb = rb.replace(/(\.)/,'\\rinvis');
+    return '\\left' + lb + '(' + p.replace(/\\\\/g,'),(').replace(/&/g,',') + ')' + '\\right' + rb;
+  });
+	tex = tex.replace(/\\le(?=(\b|\d))/g,' <= ');
+	tex = tex.replace(/\\ge(?=(\b|\d))/g,' >= ');
+  tex = tex.replace(/\\ne(?=(\b|\d))/g,' != ');
+  tex = tex.replace(/\+\-/g,' + - '); // ensure spacing so it doesn't interpret as +-
+  tex = tex.replace(/\\pm/g,' +- ');
+	tex = tex.replace(/\\approx/g,' ~~ ');
+  tex = tex.replace(/\\leftarrow/g,' larr ');
+  tex = tex.replace(/\\leftrightarrow/g,' leftrightarrow ');
+	tex = tex.replace(/(\\arrow|\\rightarrow)/g,' rarr ');
+    tex = tex.replace(/\\rightleftharpoons/g,' rightleftharpoons ');
     // move to intervalscorepart tex = tex.replace(/\\cup/g,'U');
-    tex = tex.replace(/\\sim/g,'~');
-    tex = tex.replace(/\\vee/g,'vv').replace(/\\wedge/g,' ^^ ');
-    tex = tex.replace(/\\Rightarrow/g,'=>').replace(/\\Leftrightarrow/g,'<=>');
-    tex = tex.replace(/\\times/g,'xx');
+    tex = tex.replace(/\\sim/g,' ~ ');
+    tex = tex.replace(/\\vee/g,' vv ').replace(/\\wedge/g,' ^^ ');
+    tex = tex.replace(/\\Rightarrow/g,' => ').replace(/\\Leftrightarrow/g,' <=> ');
+    tex = tex.replace(/\\times/g,' xx ');
 	tex = tex.replace(/\\left\\{/g,'lbrace').replace(/\\right\\}/g,'rbrace');
 	tex = tex.replace(/\\left/g,'');
 	tex = tex.replace(/\\right/g,'');
-	tex = tex.replace(/\\langle/g,'<<');
-	tex = tex.replace(/\\rangle/g,'>>');
+	tex = tex.replace(/\\langle/g,' << ');
+	tex = tex.replace(/\\rangle/g,' >> ');
 	tex = tex.replace(/\\cdot/g,'*');
-	tex = tex.replace(/\\infty/g,'oo');
+	tex = tex.replace(/\\infty/g,' oo ').replace(/-\s+oo/g, '-oo');
 	tex = tex.replace(/\\nthroot/g,'root');
   tex = tex.replace(/\\overline/g,'bar');
   tex = tex.replace(/\\mid/g,'|');
-	tex = tex.replace(/\\/g,'');
+	tex = tex.replace(/\\/g,' ');
 	tex = tex.replace(/sqrt\[(.*?)\]/g,'root($1)');
 	tex = tex.replace(/(\d)frac/g,'$1 frac');
     tex = tex.replace(/degree/g,'degree '); // prevent degreesin from becoming degree in
@@ -846,6 +896,7 @@ function MQtoAM(tex,display) {
   tex = tex.replace(/_{(\w+)}$/g,'_($1)');
 	tex = tex.replace(/{/g,'(').replace(/}/g,')');
 	tex = tex.replace(/lbrace/g,'{').replace(/rbrace/g,'}');
+  tex = tex.replace(/linvis/g,'{:').replace(/rinvis/g,':}');
 	tex = tex.replace(/\(([\d\.]+)\)\/\(([\d\.]+)\)/g,'$1/$2 ');  //change (2)/(3) to 2/3
 	tex = tex.replace(/\/\(([\d\.]+)\)/g,'/$1 ');  //change /(3) to /3
 	tex = tex.replace(/\(([\d\.]+)\)\//g,'$1/');  //change (3)/ to 3/

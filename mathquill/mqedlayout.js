@@ -422,7 +422,7 @@ var myMQeditor = (function($) {
     //TODO: fix this - need to get from params
     var vars = textel.attr("data-mq-vars") || '';
     vars = (vars=='') ? [] : vars.split(/,/);
-    var calcformat = textel.attr("data-mq");
+    var calcformat = textel.attr("data-mq") || '';
     var qtype = calcformat.split(/,/)[0];
     var baselayout = [];
     if (layoutstyle === 'OSK') {
@@ -550,6 +550,10 @@ var myMQeditor = (function($) {
         if (calcformat.match(/allowdegrees/)) {
             baselayout.tabs[2].tabcontent[0].contents[13] = {l:'\\degree'};
         }
+      } else if (calcformat.match(/allowdegrees/)) {
+        baselayout.tabs[2].enabled = true;
+        baselayout.tabs[2].tabcontent[0].contents[13] = {l:'\\degree'};
+        baselayout.tabs[2].tabcontent[0].contents.splice(0,12); // only show pi and degrees
       }
     }
     if (qtype.match(/interval/)) {

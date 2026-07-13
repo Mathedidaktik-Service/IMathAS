@@ -1,5 +1,5 @@
 <template>
-  <div class = "questionwrap questionpane" ref="main">
+  <div class = "questionwrap questionpane" ref="main" tabindex="-1">
     <div v-if = "!questionContentLoaded">
       {{ $t('loading') }}
     </div>
@@ -39,6 +39,7 @@
       v-html="questionData.html"
       class = "question"
       :id="'questionwrap' + qn"
+      :key="questionData.seed"
       ref = "thisqwrap"
     />
     <question-helps
@@ -132,7 +133,8 @@ export default {
       work: '',
       lastWorkVal: '',
       showWorkInput: false,
-      loadingAttempted: false
+      loadingAttempted: false,
+      mathrendered: false
     };
   },
   computed: {
@@ -190,7 +192,8 @@ export default {
       return (store.inProgress &&
         !store.inPrintView &&
         !this.disabled &&
-        this.questionData.hadSeqNext !== true &&
+        store.assessInfo.displaymethod !== 'drill' &&
+        this.hasSeqNext !== true &&
         (this.questionData.hasOwnProperty('score') ||
          this.questionData.status === 'attempted'
         ) &&
@@ -358,9 +361,10 @@ export default {
       if (this.questionData.rendered || !this.active) {
         return;
       }
+      this.mathrendered = false;
       setTimeout(window.drawPics, 100);
       window.initlinkmarkup(this.$refs.thisqwrap);
-      window.rendermathnode(this.$refs.thisqwrap);
+      window.rendermathnode(this.$refs.thisqwrap, ()=>this.mathrendered=true);
       window.initSageCell(this.$refs.thisqwrap);
       window.setupSeqPartToggles(this.$refs.thisqwrap);
       this.updateTime(true);
@@ -379,11 +383,83 @@ export default {
           }
         });
       }
-
+      
       window.imathasAssess.init(this.questionData.jsparams, store.enableMQ, this.$refs.thisqwrap);
       setTimeout(window.sendLTIresizemsg, 100);
       actions.setRendered(this.qn, true);
+      if (store.assessInfo.displaymethod === 'drill' && !store.assessInfo.drawalt) {
+        this.focusFirstInput();
+      }
     },
+    focusFirstInput () {
+      if (!this.mathrendered) {
+        setTimeout(this.focusFirstInput, 50);
+        return; 
+      }
+      const container = this.$refs.thisqwrap;
+      if (!container) {
+        return;
+      }
+      const mqel = container.querySelector('span[id^="mqinput-"]');
+      if (mqel) {
+        window.MQ(mqel).focus();
+        window.MQ(mqel).select();
+      } else {
+        const inputEl = container.querySelector('input[id^="qn"],select[id^="qn"],textarea[id^="qn"]');
+        if (inputEl) {
+          inputEl.focus();
+          if (typeof inputEl.select === 'function') {
+            inputEl.select();
+          }
+        }
+      }
+    },
+    setSeqNextResult () {
+      if (this.hasSeqNext && !this.questionData.jsparams.submitall) {
+        let regex = /^(qn|tc|qs)(\d+)/;
+        let hasuntried = false;
+        let hasincorrect = false;
+        let hasok = false;
+        let qData = this.questionData;
+        let seqStep = window.$('#questionwrap' + this.qn).find('.seqsep').length;
+
+        // look in div following last seqsep for current question part
+        window.$('#questionwrap' + this.qn).find('.seqsep').last().next().find('input,select,textarea')
+          .each(function (index, el) {
+            let match;
+            if ((match = el.name.match(regex))) {
+              const pn = match[2] % 1000;
+              if (!qData.parts.hasOwnProperty(pn) || qData.parts[pn].try === 0) {
+                hasuntried = true;
+              } else if (qData.parts[pn].try < qData.tries_max &&
+                qData.parts[pn].hasOwnProperty('rawscore') &&
+                qData.parts[pn].rawscore < 1
+              ) {
+                hasincorrect = true;
+              } else {
+                hasok = true;
+              }
+            }
+        });
+        let seqresult = '';
+        if (hasincorrect) {
+          seqresult += this.$t('seqresult-incorrect') + '. ';
+        }
+        if (hasincorrect || (hasuntried && hasok)) {
+          seqresult += this.$t('seqresult-continue') + '. ';
+        }
+        if (seqresult === '' && seqStep > 1) {
+          seqresult += this.$t('seqresult-next') + '. ';
+        }
+        if (seqresult !== '') {
+          const target = window.$('#questionwrap' + this.qn).find('.seqscoreresult').last();
+          if (hasincorrect) {
+            target.addClass('partial');
+          }
+          target.text(seqresult).show();
+        }
+      }
+    }, 
     setInitValues () {
       var regex = /^(qn|tc|qs)\d/;
       var thisqn = this.qn;
@@ -429,9 +505,11 @@ export default {
     }
   },
   updated () {
+    if (this.inTransit) { return; } // avoid update triggered by intransit
     if (this.questionContentLoaded) {
       this.disableOutOfTries();
       this.renderAndTrack();
+      this.setSeqNextResult();
     } else {
       this.loadQuestionIfNeeded();
     }
@@ -446,6 +524,7 @@ export default {
     if (this.questionContentLoaded) {
       this.disableOutOfTries();
       this.renderAndTrack();
+      this.setSeqNextResult();
     }
   },
   beforeUnmount () {
@@ -477,3 +556,13 @@ export default {
   }
 };
 </script>
+<style>
+  .seqscoreresult {
+    padding: 8px;
+    margin-top: 12px;
+    background-color: #f3f3f3;
+  }
+  .seqscoreresult.partial {
+    background-color: #fff9dd;
+  }
+</style>

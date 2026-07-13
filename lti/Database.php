@@ -319,11 +319,14 @@ class Imathas_LTI_Database implements LTI\Database
      * Get local user id
      * @param  LTI_Message_Launch $launch
      * @param  string $role
+     * @param  string $ltiuserid (optional, only provide if using a different value than primary launch user)
      * @return false|int local userid
      */
-    public function get_local_userid(LTI\LTI_Message_Launch $launch, string $role)
+    public function get_local_userid(LTI\LTI_Message_Launch $launch, string $role, string $ltiuserid = '')
     {
-        $ltiuserid = $launch->get_platform_user_id();
+        if ($ltiuserid === '') {
+            $ltiuserid = $launch->get_platform_user_id();
+        }
         $platform_id = $launch->get_platform_id();
 
         $query = 'SELECT lti.userid,iu.LastName,lti.id FROM imas_ltiusers AS lti 
@@ -336,7 +339,7 @@ class Imathas_LTI_Database implements LTI\Database
 
         $stm = $this->dbh->prepare($query);
         $stm->execute(array($ltiuserid, 'LTI13-' . $platform_id));
-        list($userid,$lastname,$refid) = $stm->fetch(PDO::FETCH_NUM);
+        list($userid,$lastname,$refid) = $stm->fetch(PDO::FETCH_NUM) ?: [false,null,null];
 
         if ($userid === null) {
             $userid = false;
@@ -456,7 +459,21 @@ class Imathas_LTI_Database implements LTI\Database
             ':LastName' => Sanitize::stripHtmlTags($data['lastname']),
             ':email' => Sanitize::emailAddress($data['email']),
             ':msgnotify' => $data['msgnot'], ':groupid' => $data['groupid']));
-        return $this->dbh->lastInsertId();
+
+        $localuserid = $this->dbh->lastInsertId();
+
+        if ($data['rights'] >= 20) {
+            //instructor account; log new account
+            $now = time();
+            $stm = $this->dbh->prepare("INSERT INTO imas_log (time, log) VALUES (:now, :log)");
+            $groupid = $data['groupid'];
+            $stm->execute(array(':now'=>$now, ':log'=>"New Instructor Request: $localuserid:: Group: $groupid, added via LTI"));
+
+            $reqdata = array('added'=>$now, 'actions'=>array(array('on'=>$now, 'status'=>11, 'via'=>'LTI')));
+            $stm = $this->dbh->prepare("INSERT INTO imas_instr_acct_reqs (userid,status,reqdate,reqdata) VALUES (?,11,?,?)");
+            $stm->execute(array($localuserid, $now, json_encode($reqdata)));
+        }
+        return $localuserid;
     }
 
     /**
@@ -486,10 +503,32 @@ class Imathas_LTI_Database implements LTI\Database
                         // sufficient rights; add them as a teacher
                         $stm = $this->dbh->prepare('INSERT INTO imas_teachers (userid,courseid) VALUES (?,?)');
                         $stm->execute(array($userid, $localcourse->get_courseid()));
+                        require_once '../includes/TeacherAuditLog.php';
+                        TeacherAuditLog::addTracking(
+                            $localcourse->get_courseid(),
+                            "Course Settings Change",
+                            null,
+                            [
+                                'action' => 'Add Teachers',
+                                'added' => $userid,
+                                'via' => 'auto by LTI'
+                            ]
+                        );
                     } else {
                         // add them as a tutor
                         $stm = $this->dbh->prepare('INSERT INTO imas_tutors (userid,courseid) VALUES (?,?)');
                         $stm->execute(array($userid, $localcourse->get_courseid()));
+                        require_once '../includes/TeacherAuditLog.php';
+                        TeacherAuditLog::addTracking(
+                            $localcourse->get_courseid(),
+                            "Roster Action",
+                            null,
+                            array(
+                                'action' => 'Add Tutors',
+                                'IDs' => $userid,
+                                'via' => 'auto by LTI'
+                            )
+                        );
                     }
                 }
             }
@@ -661,6 +700,17 @@ class Imathas_LTI_Database implements LTI\Database
     public function add_lti_course(string $contextid, int $platform_id,
         int $localcid, string $label = '', int $copiedfrom = 0
     ): int {
+        require_once '../includes/TeacherAuditLog.php';
+        TeacherAuditLog::addTracking(
+            $localcid,
+            "Course Settings Change",
+            $localcid,
+            [
+                'action'=>'Establish LTI course connection',
+                'type'=>'1.3',
+                'contextid'=>$contextid,
+            ]
+        );
         $stm = $this->dbh->prepare('INSERT INTO imas_lti_courses (contextid,org,courseid,contextlabel,copiedfrom) VALUES (?,?,?,?,?)');
         $stm->execute(array($contextid, 'LTI13-' . $platform_id, $localcid, $label, $copiedfrom));
         return $this->dbh->lastInsertId();
@@ -856,7 +906,7 @@ class Imathas_LTI_Database implements LTI\Database
         $stm->execute(array($resource_link_id, $contextid, 'LTI13-' . $platform_id));
         $row = $stm->fetch(PDO::FETCH_ASSOC);
         if ($row !== false) {
-            if ($row['enddate'] === null) {
+            if ($row['placementtype'] == 'assess' && $row['enddate'] === null) {
                 // lti link exists but assessment doesn't exist anymore
                 // so probably deleted since link was established.
                 throw new LTI\LTI_Exception("Linked assessment appears to have been deleted. Ref: " . $row['typeid'] . '-' . $resource_link_id);
@@ -872,9 +922,9 @@ class Imathas_LTI_Database implements LTI\Database
                 ->set_typeid($row['typeid'])
                 ->set_placementtype($row['placementtype'])
                 ->set_typenum($this->types_as_num[$row['placementtype']])
-                ->set_date_by_lti($row['date_by_lti'])
-                ->set_startdate($row['startdate'])
-                ->set_enddate($row['enddate']);
+                ->set_date_by_lti($row['date_by_lti'] ?? null)
+                ->set_startdate($row['startdate'] ?? null)
+                ->set_enddate($row['enddate'] ?? null);
         }
         return null;
     }
@@ -982,9 +1032,9 @@ class Imathas_LTI_Database implements LTI\Database
             if ($link->get_date_by_lti() > 0 && $lms_duedate != $exceptionrow['enddate']) {
                 //if new due date is later, or no latepass used, then update
                 if ($exceptionrow['islatepass'] == 0 || $lms_duedate > $exceptionrow['enddate']) {
-                    $stm = $this->dbh->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
+                    $stm = $this->dbh->prepare("UPDATE imas_exceptions SET startdate=:startdate,enddate=:enddate,is_lti=1,islatepass=0,manualexceptionend=:enddate2 WHERE userid=:userid AND assessmentid=:assessmentid AND itemtype='A'");
                     $stm->execute(array(':startdate' => min($now, $lms_duedate, $exceptionrow['startdate']),
-                        ':enddate' => $lms_duedate, ':userid' => $userid, ':assessmentid' => $aid));
+                        ':enddate' => $lms_duedate, ':enddate2' => $lms_duedate, ':userid' => $userid, ':assessmentid' => $aid));
                 }
             }
         } else if ($link->get_date_by_lti() == 3 &&
@@ -992,8 +1042,8 @@ class Imathas_LTI_Database implements LTI\Database
         ) {
             //default dates already set by LTI, and users's date doesn't match - create new exception
             //also create if it's before the default assessment startdate - since they could access via LMS, it should be available.
-            $stm = $this->dbh->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,'A')");
-            $stm->execute(array(min($now, $lms_duedate), $lms_duedate, 0, 1, $userid, $aid));
+            $stm = $this->dbh->prepare("INSERT INTO imas_exceptions (startdate,enddate,islatepass,is_lti,manualexceptionend,userid,assessmentid,itemtype) VALUES (?,?,?,?,?,?,?,'A')");
+            $stm->execute(array(min($now, $lms_duedate), $lms_duedate, 0, 1, $lms_duedate, $userid, $aid));
         }
     }
 

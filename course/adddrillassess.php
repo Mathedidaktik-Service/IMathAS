@@ -155,9 +155,9 @@ if (!isset($_GET['daid'])) {
 			$updatebests = true;
 		}
 
-		$n = intval($_POST['n']);
-		$scoretype = $_POST['scoretype'];
 		if (!$beentaken) {
+			$n = intval($_POST['n']);
+			$scoretype = $_POST['scoretype'];
 			$showtype = intval($_POST['showtype']);
 		}
 		$showtostu = (isset($_POST['showlast'])?1:0) + (isset($_POST['showpbest'])?2:0) + (isset($_POST['showcbest'])?4:0);
@@ -262,7 +262,7 @@ $placeinhead = "<script type=\"text/javascript\">
 $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/addquestions.js\"></script>";
 $placeinhead .= '<script type="text/javascript" src="'.$staticroot.'/javascript/tablesorter.js"></script>';
 $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/DatePicker.js\"></script>";
-$placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/qsearch.js?111925\"></script>";
+$placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/qsearch.js?062526\"></script>";
 $placeinhead .= "<link rel=\"stylesheet\" href=\"$staticroot/course/addquestions2.css?v=060823\" type=\"text/css\" />";
 require_once "../header.php";
 

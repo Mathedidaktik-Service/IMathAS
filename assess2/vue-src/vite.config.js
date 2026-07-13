@@ -100,7 +100,7 @@ function updatePhpFiles() {
 
 export default defineConfig(({ mode }) => {
   const isProduction = mode === 'production';
-  const env = loadEnv(mode, process.cwd(), '');
+  const env = loadEnv(mode, process.cwd(), 'VUE_APP_');
 
   return {
     // allow reuse of the existing ENV variables
@@ -115,7 +115,7 @@ export default defineConfig(({ mode }) => {
       }),
       legacy({
         // builds the legacy version
-        targets: ["defaults", "not IE 11"],
+        targets: ["defaults", "not IE 11"]
       }),
       updatePhpFiles(),
       // strip the ?v=hash from the stored filenames; we only want the hash encoded
@@ -138,7 +138,7 @@ export default defineConfig(({ mode }) => {
       cssCodeSplit: false,
       // needed for plugin above
       manifest: true,
-      rollupOptions: {
+      rolldownOptions: {
         // our two entry points
         input: {
             index: path.resolve(__dirname, 'index.html'),
