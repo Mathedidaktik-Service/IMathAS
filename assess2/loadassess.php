@@ -14,6 +14,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -264,6 +265,8 @@ $assessInfoOut['can_viewingb'] = $assess_info->reshowQuestionsInGb() ? 1 : 0;
 $assessInfoOut['session_life'] = $CFG['GEN']['sessionmaxlife'] ?? 432000;
 
 $assessInfoOut['summary'] = filter($assessInfoOut['summary']);
+
+$assessInfoOut['srready'] = ($_SESSION['userprefs']['graphdisp'] == 0 && $_SESSION['userprefs']['drawentry'] == 0);
 
 //prep date display
 prepDateDisp($assessInfoOut);

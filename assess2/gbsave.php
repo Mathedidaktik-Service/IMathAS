@@ -18,6 +18,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -99,7 +100,7 @@ if (!empty($changes)) {
   );
 }
 
-// update LTI grade
-$assess_record->updateLTIscore(true, false);
+// update LTI grade. Treat isstu if manually released
+$assess_record->updateLTIscore(true, !empty($changes['manually_released']));
 
 echo json_encode($out, JSON_INVALID_UTF8_IGNORE);

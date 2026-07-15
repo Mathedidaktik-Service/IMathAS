@@ -141,6 +141,8 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 						'lasttry' => ($row['failures']>=6)
 					)
 				);
+			} else if ($updater1p3->token_giveup($platformid)) {
+				giveupQueueItem($row['hash']);
 			} else {
 				$updater1p3->update_sendon($row['hash'], $platformid);
 			}
@@ -247,6 +249,8 @@ if (count($round2)>0 &&  $timeused < 40) {
 						'lasttry' => ($row['failures']>=6)
 					)
 				);
+			} else if ($updater1p3->token_giveup($platformid)) {
+				giveupQueueItem($row['hash']);
 			} else {
 				$updater1p3->update_sendon($row['hash'], $platformid);
 			}
@@ -308,15 +312,17 @@ function LTIqueuePostdataCallback($data) {
 		$keyparts = explode('_',$data['key']);
 		$stm = $DBH->prepare("SELECT ltisecret FROM imas_courses WHERE id=:id");
 		$stm->execute(array(':id'=>$keyparts[1]));
-		if ($stm->rowCount()>0) {
-			$secret = $stm->fetchColumn(0);
+		$fetchedsecret = $stm->fetchColumn(0);
+		if ($fetchedsecret !== false) {
+			$secret = $fetchedsecret;
 			$LTIsecrets[$data['key']] = $secret;
 		}
 	} else {
 		$stm = $DBH->prepare("SELECT password FROM imas_users WHERE SID=:SID AND (rights=11 OR rights=76 OR rights=77)");
 		$stm->execute(array(':SID'=>$data['key']));
-		if ($stm->rowCount()>0) {
-				$secret = $stm->fetchColumn(0);
+		$fetchedsecret = $stm->fetchColumn(0);
+		if ($fetchedsecret !== false) {
+				$secret = $fetchedsecret;
 				$LTIsecrets[$data['key']] = $secret;
 		}
 	}
@@ -434,4 +440,10 @@ function deleteInvalid($hash) {
 	global $DBH;
 	$delfromqueue = $DBH->prepare("DELETE FROM imas_ltiqueue WHERE hash=?");
     $delfromqueue->execute([$hash]);
+}
+
+function giveupQueueItem($hash) {
+	global $DBH;
+	$stm = $DBH->prepare("UPDATE imas_ltiqueue SET failures=7 WHERE hash=?");
+    $stm->execute([$hash]);
 }

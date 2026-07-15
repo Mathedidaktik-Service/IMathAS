@@ -3,6 +3,7 @@
 //(c) 2006 David Lippman
 
 /*** master php includes *******/
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 
 
@@ -102,7 +103,7 @@ if ($myrights<20) {
 						$query .= "imas_questionset.id=:id";
 						$stm = $DBH->prepare($query);
 						$stm->execute(array(':groupid'=>$groupid, ':id'=>$qsetid));
-						if ($stm->rowCount()>0) {
+						if ($stm->fetch(PDO::FETCH_NUM) !== false) {
 							$stm = $DBH->prepare("UPDATE imas_questionset SET deleted=1 WHERE id=:id");
 							$stm->execute(array(':id'=>$qsetid));
 							if ($stm->rowCount()>0) {
@@ -140,7 +141,7 @@ if ($myrights<20) {
 						$query .= "AND imas_library_items.deleted=0";
 						$stm = $DBH->prepare($query);
 						$stm->execute(array(':groupid'=>$groupid, ':qsetid'=>$qsetid, ':libid'=>$lib));
-						if ($stm->rowCount()>0) {
+						if ($stm->fetch(PDO::FETCH_NUM) !== false) {
 							$stm = $DBH->prepare("DELETE FROM imas_library_items WHERE qsetid=:qsetid AND libid=:libid");
 							$stm->execute(array(':qsetid'=>$qsetid, ':libid'=>$lib));
 							if ($stm->rowCount()>0) {
@@ -164,7 +165,7 @@ if ($myrights<20) {
 					if ($madechange) {
 						$stm = $DBH->prepare("SELECT id FROM imas_library_items WHERE qsetid=:qsetid AND deleted=0");
 						$stm->execute(array(':qsetid'=>$qsetid));
-						if ($stm->rowCount()==0) {
+						if ($stm->fetch(PDO::FETCH_NUM) === false) {
 							$stm = $DBH->prepare("INSERT INTO imas_library_items (qsetid,libid,ownerid) VALUES (:qsetid, :libid, :ownerid)");
 							$stm->execute(array(':qsetid'=>$qsetid, ':libid'=>0, ':ownerid'=>$userid));
 						}
@@ -197,7 +198,7 @@ if ($myrights<20) {
 				$query .= "WHERE iq.id=:id AND iq.ownerid=imas_users.id AND (imas_users.groupid=:groupid OR iq.userights>3)";
 				$stm = $DBH->prepare($query);
 				$stm->execute(array(':id'=>$qsetid, ':groupid'=>$groupid));
-				if ($stm->rowCount()>0) {
+				if ($stm->fetch(PDO::FETCH_NUM) !== false) {
 					$query = "UPDATE imas_questionset SET description=:description,";
 					$query .= "qtype=:qtype,control=:control,qcontrol=:qcontrol,";
 					$query .= "qtext=:qtext,answer=:answer,lastmoddate=:lastmoddate ";

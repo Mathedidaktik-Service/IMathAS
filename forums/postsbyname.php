@@ -44,7 +44,7 @@
             */
             $stm2 = $DBH->prepare("SELECT lastview FROM imas_forum_views WHERE userid=:userid AND threadid=:threadid");
 			$stm2->execute(array(':userid'=>$userid, ':threadid'=>$row[0]));
-			if ($stm2->rowCount()>0) {
+			if ($stm2->fetch(PDO::FETCH_NUM) !== false) {
 				$stm2 = $DBH->prepare("UPDATE imas_forum_views SET lastview=:lastview WHERE userid=:userid AND threadid=:threadid");
 				$stm2->execute(array(':lastview'=>$now, ':userid'=>$userid, ':threadid'=>$row[0]));
 			} else{
@@ -90,7 +90,7 @@
 	if (!$canviewall && $postbeforeview) {
 		$stm = $DBH->prepare("SELECT id FROM imas_forum_posts WHERE forumid=:forumid AND parent=0 AND userid=:userid LIMIT 1");
 		$stm->execute(array(':forumid'=>$forumid, ':userid'=>$userid));
-		if ($stm->rowCount()==0) {
+		if ($stm->fetch(PDO::FETCH_NUM) === false) {
 			echo '<p>This page is blocked. In this forum, you must post your own thread before you can read those posted by others.</p>';
 			require_once "../footer.php";
 			exit;
@@ -103,22 +103,22 @@
 	   var butn = document.getElementById('butn'+bnum);
 	   if (node.className == 'blockitems') {
 	       node.className = 'hidden';
-	       butn.value = '+';
+	       butn.textContent = '+';
 	   } else {
 	       node.className = 'blockitems';
-	       butn.value = '-';
+	       butn.textContent = '-';
 	   }
-	   butn.setAttribute("aria-expanded", butn.value == '-');
+	   butn.setAttribute("aria-expanded", butn.textContent == '-');
 	}
 	function toggleshowall() {
 	  for (var i=0; i<bcnt; i++) {
 	    var node = document.getElementById('m'+i);
 	    var butn = document.getElementById('butn'+i);
 	    node.className = 'blockitems';
-	    butn.value = '-';
+	    butn.textContent = '-';
 		butn.setAttribute("aria-expanded", true);
 	  }
-	  document.getElementById("toggleall").value = 'Collapse All';
+	  document.getElementById("toggleall").textContent = _('Collapse All');
 	  document.getElementById("toggleall").onclick = togglecollapseall;
 	}
 	function onsubmittoggle() {
@@ -132,10 +132,10 @@
 	    var node = document.getElementById('m'+i);
 	    var butn = document.getElementById('butn'+i);
 	    node.className = 'hidden';
-	    butn.value = '+';
+	    butn.textContent = '+';
 		butn.setAttribute("aria-expanded", false);
 	  }
-	  document.getElementById("toggleall").value = 'Expand All';
+	  document.getElementById("toggleall").textContent = _('Expand All');
 	  document.getElementById("toggleall").onclick = toggleshowall;
 	}
 	function toggleposts(el) {
@@ -193,8 +193,8 @@
 	if ($haspoints && $caneditscore && $rubric != 0) {
 		$stm = $DBH->prepare("SELECT id,rubrictype,rubric FROM imas_rubrics WHERE id=:id");
 		$stm->execute(array(':id'=>$rubric));
-		if ($stm->rowCount()>0) {
-			$row = $stm->fetch(PDO::FETCH_NUM);
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
 			// $row data is sanitized by printrubrics().
 			echo printrubrics(array($row));
 		}
@@ -216,8 +216,9 @@
 		$query .= "WHERE i_sgm.userid=:userid AND i_sg.groupsetid=:groupsetid";
 		$stm = $DBH->prepare($query);
 		$stm->execute(array(':userid'=>$userid, ':groupsetid'=>$groupsetid));
-		if ($stm->rowCount()>0) {
-			$groupid = $stm->fetchColumn(0);
+		$groupidcol = $stm->fetchColumn(0);
+		if ($groupidcol !== false) {
+			$groupid = $groupidcol;
 		} else {
 			$groupid=0;
 		}
@@ -252,7 +253,7 @@
 
 	$laststu = -1;
 	$cnt = 0;
-	echo "<input type=\"button\" value=\"Expand All\" onclick=\"toggleshowall()\" id=\"toggleall\"/> ";
+	echo "<button type=\"button\" onclick=\"toggleshowall()\" id=\"toggleall\">"._('Expand All')."</button> ";
 	echo '<button type="button" onclick="toggleposts(this)">'._("Hide Posts").'</button> ';
 	echo '<button type="button" onclick="togglereplies(this)">'._("Hide Replies").'</button> ';
 	echo "<button type=\"button\" onclick=\"window.location.href='postsbyname.php?cid=$cid&forum=$forumid&markallread=true'\">"._('Mark all Read')."</button><br/>";
@@ -297,7 +298,7 @@
 			$postcnt++;
 		}
 
-		$content .= "<input type=\"button\" value=\"+\" onclick=\"toggleshow($cnt)\" id=\"butn$cnt\" aria-controls=\"m$cnt\" aria-expanded=\"false\" />";
+		$content .= "<button type=\"button\" onclick=\"toggleshow($cnt)\" id=\"butn$cnt\" aria-controls=\"m$cnt\" aria-expanded=\"false\">+</button>";
 		$content .= '<span style="flex-grow:1">';
 		if ($line['parent']!=0) {
 			$content .= '<span style="color:#060">';
@@ -390,7 +391,7 @@
 	printuserposts($lastname, $laststu, $content, $postcnt, $replycnt, $lasthasuserimg);
 	echo "<script>var bcnt = $cnt;</script>";
 	if ($caneditscore && $haspoints) {
-		echo "<div><input type=submit value=\"Save Grades\" /></div>";
+		echo "<div><button type=\"submit\">"._('Save Grades')."</button></div>";
 		echo "</form>";
 	}
 

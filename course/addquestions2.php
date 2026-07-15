@@ -6,6 +6,7 @@
 require_once "../init.php";
 require_once "../includes/htmlutil.php";
 require_once "../includes/TeacherAuditLog.php";
+require_once "../includes/viddatautil.php";
 
 /*** pre-html data manipulation, including function code *******/
 
@@ -111,34 +112,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			} else {
 				$itemorder  = $row[0] . "," . implode(",",$qids);
 			}
-			$viddata = $row[1];
-			if ($viddata != '') {
-				$nextnum = 0;
-				if ($row[0]!='') {
-					foreach (explode(',', $row[0]) as $iv) {
-						if (strpos($iv,'|')!==false) {
-							$choose = explode('|', $iv);
-							$nextnum += $choose[0];
-						} else {
-							$nextnum++;
-						}
-					}
-				}
-				$numnew= count($checked);
-				$viddata = unserialize($viddata);
-				if (!isset($viddata[count($viddata)-1][1])) {
-					$finalseg = array_pop($viddata);
-				} else {
-					$finalseg = '';
-				}
-				for ($i=$nextnum;$i<$nextnum+$numnew;$i++) {
-					$viddata[] = array('','',$i);
-				}
-				if ($finalseg != '') {
-					$viddata[] = $finalseg;
-				}
-				$viddata = serialize($viddata);
-			}
+			$viddata = appendBlankVidSegments($row[0], count($checked), $row[1]);
 			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata WHERE id=:id");
 			$stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':id'=>$aid));
 
@@ -604,6 +578,7 @@ if ($overwriteBody==1) {
 			echo ' <li><a href="#" onclick="groupSelected();return false;">', _('Group'), "</a></li>";
 			echo ' <li><a href="#" onclick="if (confirm_textseg_dirty()) { modsettings();} return false;">',_('Change Settings'), "</a></li>";
 			echo '</ul></span>';
+
 		}
 ?>
 		<span id="submitnotice" class=noticetext></span>
@@ -613,7 +588,7 @@ if ($overwriteBody==1) {
 	</form>
 	<p><?php echo _('Assessment points total:') ?> <span id="pttotal"></span><br>
 	   <?php echo _('Estimated average time:') ?> <span id="avgtimetotal"></span> <?php echo _('min'); ?>. 
-		<span class="nowrap" onmouseover="tipshow(this,'<?php echo _('95th percentile: 95%% of past students would take this long or less to complete 1 try at each question');?>')" onmouseout="tipout()">P<sub>95</sub>: <span id="p95timetotal"></span> <?php echo _('min'); ?>.</span>
+		<span class="nowrap" onmouseover="tipshow(this,'<?php echo _('95th percentile: 95&percnt; of past students would take this long or less to complete 1 try at each question') ?>')" onmouseout="tipout()">P<sub>95</sub>: <span id="p95timetotal"></span> <?php echo _('min'); ?>.</span>
 		<span id="avgtimemissing" class="small" style="display:none;"><br><em><?php echo _('Not all questions have time data yet, so this estimate will be inaccurate.');?></em></span>
 		<?php if ($showtimewarning) {
 			echo '<br><span class="small">'._('Your assessment allows multiple attempts or tries on questions, so keep in mind the estimate is for a single try at each question.').'</span>';

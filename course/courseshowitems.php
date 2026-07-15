@@ -1248,11 +1248,12 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo filter("<div class=itemsum>{$line['text']}\n");
                 $stm = $DBH->prepare("SELECT id,description,filename FROM imas_instr_files WHERE itemid=:itemid");
                 $stm->execute(array(':itemid' => $typeid));
-                if ($stm->rowCount() > 0) {
+                $instrfilerows = $stm->fetchAll(PDO::FETCH_NUM);
+                if (count($instrfilerows) > 0) {
                     echo '<ul class="fileattachlist">';
                     $filenames = array();
                     $filedescr = array();
-                    while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+                    foreach ($instrfilerows as $row) {
                         $filenames[$row[0]] = $row[2];
                         $filedescr[$row[0]] = $row[1];
                     }
@@ -1297,11 +1298,12 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo filter("<div class=itemsum>{$line['text']}\n");
                 $stm = $DBH->prepare("SELECT id,description,filename FROM imas_instr_files WHERE itemid=:itemid");
                 $stm->execute(array(':itemid' => $typeid));
-                if ($stm->rowCount() > 0) {
+                $instrfilerows = $stm->fetchAll(PDO::FETCH_NUM);
+                if (count($instrfilerows) > 0) {
                     echo '<ul class="fileattachlist">';
                     $filenames = array();
                     $filedescr = array();
-                    while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+                    foreach ($instrfilerows as $row) {
                         $filenames[$row[0]] = $row[2];
                         $filedescr[$row[0]] = $row[1];
                     }
@@ -1609,7 +1611,7 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo "<div class=title> ";
                 echo "<b><a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}\">" . Sanitize::encodeStringForDisplay($line['name']) . "</a></b>\n";
                 if (isset($newpostcnts[$line['id']]) && $newpostcnts[$line['id']] > 0) {
-                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&page=-1\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
+                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&type=new\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
                 }
                 if ($viewall) {
                     echo '<span class="instrdates">';
@@ -1719,7 +1721,7 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
 
                 echo "<div class=title><i> <b><a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}\">" . Sanitize::encodeStringForDisplay($line['name']) . "</a></b></i> ";
                 if (isset($newpostcnts[$line['id']]) && $newpostcnts[$line['id']] > 0) {
-                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&page=-1\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
+                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&type=new\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
                 }
                 echo '<span class="instrdates">';
                 echo "<br/><i>$show </i>";
@@ -1769,9 +1771,8 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                     $query .= "WHERE i_sgm.userid=:userid AND i_sg.groupsetid=:groupsetid";
                     $stm = $DBH->prepare($query);
                     $stm->execute(array(':userid' => $userid, ':groupsetid' => $line['groupsetid']));
-                    if ($stm->rowCount() > 0) {
-                        $wikigroupid = $stm->fetchColumn(0);
-                    } else {
+                    $wikigroupid = $stm->fetchColumn(0);
+                    if ($wikigroupid === false) {
                         $wikigroupid = 0;
                     }
                 }

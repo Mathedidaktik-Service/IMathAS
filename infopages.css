@@ -89,6 +89,31 @@ div#header {
 	width: auto;
 	border: 1px solid #000000;
 }
+.logingrid {
+	display: grid;
+  	grid-template-columns: auto auto;
+	gap: 10px;
+}
+
+.separator {
+	display: flex;
+	align-items: center;
+	text-align: center;
+	color: #666;
+	margin: .5em 0;
+}
+
+.separator::before,
+.separator::after {
+	content: "";
+	flex: 1;
+	border-bottom: 1px solid #ccc;
+}
+
+.separator span {
+	padding: 0 1em;
+}
+#passkeyentry { margin: 0; padding:0;}</style>';
 
 ul#navlist
 {
@@ -136,6 +161,7 @@ color: #fff;
 
 .textright {
 	text-align: right;
+	margin-right: 0px;
 }
 .ind {
 	margin-left: 20px;
