@@ -58,6 +58,7 @@ closed-pasttime = Die Zeit für diesen test ist abgelaufen.
 closed-needprereq = Sie haben noch nicht die Voraussetzungen erfüllt, um an diesem Test zu arbeiten.
 closed-prereqreq = Eine Punktzahl von {$score} für {$name} ist erforderlich.
 closed-no_attempts = Sie haben alle Versuche für diesen Test verbraucht.
+closed-retakewait = Dieser Test erfordert eine Pause, ehe Du ihn erneut versuchen kannst.Du kannst den Test noch einmal machen ab: {$date}.
 closed-latepassn = 
     { $n ->
         [one] Sie können einmal verspätet einreichen.
@@ -109,6 +110,8 @@ setlist-extension = Ihnen wurde eine Verlängerung gewährt.
 setlist-penalty = Ein Punktabzug von {$p}% wird angewendet.
 setlist-penalty_after = Nach dem {$date} wird ein Punktabzug von {$p}% fällig.
 setlist-earlybonus = Ein Bonus von {$p}% wird bis zum {$date} gewährt.
+setlist-penalty_interval = Für verspätet eingereichte Arbeiten wird ein Punktabzug von {$p}% alle {$hrs} Stunden angewendet; aktuell gilt ein Punktabzug von {$cur}%.
+setlist-penalty_interval_after = Ein Punktabzug von {$p}% wird alle {$hrs} Stunden angewendet nach {$date}.
 setlist-take = 
     { $n ->
         [one] Sie können diesen Test einmal machen.
@@ -145,6 +148,12 @@ setlist-latepass_needed =
         [one] Sie können ein Kulanzguthaben einlösen, um das Fälligkeitsdatum auf {$date} zu verlängern
         *[other] Sie können {$n} Kulanzguthaben einlösen, um das Fälligkeitsdatum auf den {$date} zu verlängern
     }
+setlist-retakewait = 
+    { $n ->
+        [one] Sie müssen für einen neuen Versuch eine Stunde warten
+        *[other] Sie müssen zwischen Versuchen {$n} Stunden warten
+    }
+    
 
 # Group
 group-isgroup = Dies ist ein Gruppentest.
@@ -198,11 +207,72 @@ question-uploading = Wird hochgeladen...
 question-intronext = Wählen Sie zunächst eine Frage aus, indem Sie die Auswahlfunktion oder die Schaltfläche „> Weiter“ oben verwenden.
 question-firstq = Erste Frage
 
+# Drill
+drill-goal_time_maxcorrect = Versuche in {$n} Sekunden so viele Fragen wie möglich zu beantworten.
+drill-goal_count_time = Beantworte {$n} Fragen so schnell wie möglich.
+drill-goal_count_correct_time = Beantworte {$n} Fragen so schnell wie möglich richtig.
+drill-goal_count_correct_attempts = Beantworte {$n} Fragen richtig mit möglichst wenig Fehlern.
+drill-goal_streak_time = Beantworte so schnell wie möglich {$n} Fragen hintereinander richtig.
+drill-goal_streak_attempts = Beantworte {$n} Fragen hintereinander richtig mit möglichst wenig Fehlern.
+drill-start = Start
+drill-incorrect_tryagain = Leider falsch. Versuch es noch einmal.
+drill-partial_tryagain = Teilweise falsch. Versuch es noch einmal.
+drill-correct_next = Richtig. Versuche die nächste Frage.
+drill-incorrect_next = Leider falsch - und es sind keine Versuche mehr übrig. Versuche die nächste Frage.
+drill-partial_next = Teilweise falsch - und es sind keine Versuche mehr übrig. Versuche die nächste Frage.
+drill-outoftries = Keine Versuche mehr übrig. Sieh Dir unten die Antworten an und fahre dann fort.
+drill-next = Nächste Frage
+drill-complete = Gute Arbeit!
+drill-restart = Versuche es noch einmal.
+drill-result_time_maxcorrect =
+    { $correct ->
+        [one] In {$n} Sekunden 1 Frage richtig.
+        *[other] In {$n} Sekunden, {$correct} Fragen richtig.
+    }
+drill-result_count_time =
+    { $n ->
+        [one] Eine Frage in {$time} Sekunden versucht.
+        *[other] {$n} Fragen in {$time} Sekunden versucht.
+    }
+drill-result_count_correct_time =
+    { $n ->
+        [one] Eine Frage richtig in {$time} Sekunden.
+        *[other] {$n} Fragen richtig in {$time} Sekunden.
+    }
+drill-result_count_correct_attempts =
+    { $n ->
+        [one] Eine Frage  richtig in {$attempts} Versuchen.
+        *[other] {$n} Fragen richtig in {$attempts} Versuchen.
+    }
+drill-result_streak_time =
+    { $n ->
+        [one] Serie mit einer Frage richtig in {$time} Sekunden.
+        *[other] Serie mit {$n} Fragen hintereinander richtig in {$time} Sekunden.
+    }
+drill-result_streak_attempts =
+    { $n ->
+        [one] Serie mit einer Frage richtig in {$attempts} Versuchen.
+        *[other] Serie mit {$n} Fragen hintereinander richtig in {$attempts} Versuchen.
+    }
+drill-progress_time_maxcorrect =
+    { $count ->
+        [one] Fortschritt: 1 Frage richtig.
+        *[other] Fortschritt: {$count} Fragen richtig.
+    }
+drill-progress_count_time = Fortschritt: {$count} von {$n} Fragen versucht.
+drill-progress_count_correct = Fortschritt: {$count} von {$n} Fragen richtig beantwortet.
+drill-progress_streak = Fortschritt: Serie von {$count} von {$n} hintereinander richtig.
+drill-best_correct = Persönliche Bestleistung: {$n} richtig
+drill-best_time = Persönliche Bestleistung: {$n} Sekunden
+drill-best_attempts = Persönliche Bestleistung: {$n} Versuche
+drill-history_title = Trainingsverlauf
+
 # Header
 header-score = Punkte: {$pts}/{$poss}
 header-practicescore = Punkte (Übung): {$pts}/{$poss}
 header-possible = {$poss} mögliche Punkte
 header-answered = {$n}/{$tot} beantwortet
+header-drills_completed = Abgeschlossene Trainings: {$n}/{$tot}
 header-assess_submit = Test einreichen
 header-done = Fertig
 header-resources_header = Resourcen
@@ -221,8 +291,9 @@ header-work_save = Arbeit speichern
 header-work_saved = Arbeit gespeichert
 header-work_save_avail = Schaltfläche zum Speichern des Fortschritts verfügbar
 header-work_saving = Speichere...
-header-confirm_assess_submit = Nach dem Einreichen können Sie Ihre Antworten in dieser Version des Tests nicht mehr ändern. Wollen Sie einreichen?
-header-confirm_assess_unattempted_submit = Es scheint, Sie haben noch nicht alle Fragen versucht. Nach Abgabe des Tests können Sie Ihre Antworten in dieser Version des Tests nicht mehr ändern. Wollen Sie jetzt wirklich einreichen?
+header-confirm_assess_submit = Nach dem Einreichen kannst Du Deine Antworten in dieser Version des Tests nicht mehr ändern. Willst Du sie einreichen?
+header-confirm_assess_unattempted_submit = Es scheint, Du hast noch nicht alle Fragen versucht. Nach Abgabe des Tests kannst Du Deine Antworten in dieser Version des Tests nicht mehr ändern. Willst Du jetzt wirklich einreichen?
+header-confirm_assess_nowork_submit = Du hast noch keine Lösungswege hinzugefügt. Nach dem Einreichen kannst Du zu dieser Testversion nichts mehr hinzufügen. Willst Du jetzt einreichen?
 header-preview_all = Vorschau aller Fragen für Dozenten
 
 # Resource
@@ -284,9 +355,15 @@ scoreresult-submitted = Frage eingereicht.
 scoreresult-see_details = Mehr unter Details.
 scoreresult-manual_grade = Die Frage enthält Teile, die Ihr Dozent bewerten muss. Bis sie bewertet wurden werden 0 Punkte angezeigt.
 scoreresult-jumptoincorrect = Springe zum ersten fehlerhaften Teil, der verändert werden kann.
+scoreresult-jumptoincorrectstart = Gehe zum Anfang des ersten fehlerhaften Teils, der geändert werden kann
 scoreresult-jumptolast = Zum zuletzt eingereichten Teil springen
 scoreresult-allpartscorrect = Alle eingereichten Teile sind korrekt.
 scoreresult-onepartincorrect = Mindestens ein bewerteter Teil ist falsch.
+
+# Sequential Score results
+seqresult-incorrect = Eine oder mehrere Antworten sind falsch
+seqresult-continue = An diesem Teil weiter arbeiten
+seqresult-next = Weiter zum nächsten Teil
 
 # Summary
 summary-no_total = Ihr Test wurde eingereicht.
@@ -617,8 +694,10 @@ work-noquestions = Alle Fragen bearbeitet
 work-save = Lösung speichern
 work-duein = Die Arbeit muss bis zum {$date} eingereicht werden.
 work-save_continue = Lösung speichern und weiter
-work-add_prev = Sie können noch Ihre Lösung für den aktuellsten Versuch einreichen
-work-remove = Sind Sie sicher, dass Sie diese Datei entfernen möchten?
+work-add_prev = Du kannst noch deine Ihre Lösung für den aktuellsten Versuch einreichen
+work-remove = Bist Du sicher, dass Du diese Datei entfernen möchtest?
+work-all = Füge hier für alle Fragen Lösungswege hinzu
+work-gbtitle = Lösungsweg
 
 # Regions
 regions-questions = Fragen und Text
@@ -642,3 +721,4 @@ latepass-reason6 = Kulanzguthaben können nicht verwendet werden, da Sie nicht g
 latepass-reason7 = Kulanzguthaben können nicht verwendet werden, da Sie diese Bewertung im Übungsmodus geöffnet haben. In diesem Modus können Kulanzguthaben nicht genutzt werden.
 latepass-reason8 = LatePässe können nicht verwendet werden, da Sie diese Bewertung in der Notenübersicht bereits eingesehen haben, und dies die Verwendung von Kulanzguthaben blockiert.
 latepass-reason9 = Kulanzguthaben können nicht verwendet werden, da Sie keine Versuche mehr übrig haben.
+latepass-reason10 = Kulanzguthaben können nicht genutzt werden weil der Punktabzug bereits 100% oder mehr beträgt.
