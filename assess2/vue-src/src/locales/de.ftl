@@ -49,6 +49,7 @@ launch-view_as_stu = Wie Student: {$name}
 launch-scorelist = Punkteübersicht
 launch-itemanalysis = Einzel-Analyse
 launch-gblinks = Links zurPunkteübersicht
+launch-a11ywarn = Wenn Sie einen Screenreader nutzen, so sollten Sie die Optionen zur Barrierefreiheit für den Graph und die Zeichenwerkzeuge aktivieren.
 
 # Closed section
 closed-hidden = Dieser Test ist derzeit nicht verfügbar.
@@ -143,6 +144,8 @@ setlist-timelimit_wgrace_restricted_penalty = Zeitbegrenzung: {$time}, mit einer
 setlist-timelimit_ext = Ihnen wurde eine Verlängerung der Zeitbegrenzung um {$n} Minuten gewährt
 setlist-timelimit_ext_used = Sie haben eine Zeitverlängerung von {$n} Minuten genutzt
 setlist-excused = Sie können diesen Test überspringen. Dies ändert nichts an Ihrer Note.
+setlist-submitnote = Schicken Sie Ihren nicht eingereichten Versuch zur Bewertung ab.
+setlist-submitretake = Schicken Sie Ihren nicht eingereichten Versuch zur Bewertung und für die Möglichkeit eines neuen Versuches ab.
 setlist-latepass_needed = 
     { $n ->
         [one] Sie können ein Kulanzguthaben einlösen, um das Fälligkeitsdatum auf {$date} zu verlängern

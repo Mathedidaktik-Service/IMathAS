@@ -28,3 +28,46 @@
 [14-May-2026 14:16:59 Europe/Berlin] Caught error by QuestionGenerator in /var/www/html/IMathAS/assess2/questions/QuestionHtmlGenerator.php(265) : eval()'d code in QSID 67:1 -- Use of undefined constant error - assumed 'error' (this will throw an Error in a future version of PHP)
 [14-May-2026 14:19:29 Europe/Berlin] Caught error by QuestionGenerator in /var/www/html/IMathAS/assess2/questions/QuestionHtmlGenerator.php(265) : eval()'d code in QSID 67:1 -- Use of undefined constant error - assumed 'error' (this will throw an Error in a future version of PHP)
 [21-May-2026 16:03:37 Europe/Berlin] Caught error by QuestionGenerator in /var/www/html/IMathAS/assess2/questions/QuestionHtmlGenerator.php(265) : eval()'d code in QSID 71:1 -- Use of undefined constant error - assumed 'error' (this will throw an Error in a future version of PHP)
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:00:46 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 119
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: mathdisp in /var/www/html/IMathAS/filter/filter.php on line 127
+[15-Jul-2026 13:04:20 Europe/Berlin] PHP Notice:  Undefined index: graphdisp in /var/www/html/IMathAS/filter/filter.php on line 134
+[15-Jul-2026 13:04:23 Europe/Berlin] PHP Notice:  Undefined index: useed in /var/www/html/IMathAS/course/addquestions2.php on line 606

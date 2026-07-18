@@ -1,122 +1,146 @@
 {
-  "_i18n-legacy.js?v=Dw3jumlK": {
-    "file": "js/i18n-legacy.js?v=Dw3jumlK",
+  "_i18n-legacy.js?v=7g1BZd2t": {
+    "file": "js/i18n-legacy.js?v=7g1BZd2t",
     "name": "i18n",
     "dynamicImports": [
-      "src/locales/de-legacy.ftl?raw"
-    ]
-  },
-  "_i18n.js?v=BgV9XZty": {
-    "file": "js/i18n.js?v=BgV9XZty",
-    "name": "i18n",
-    "dynamicImports": [
-      "src/locales/de.ftl?raw"
+      "src/locales/de-legacy.ftl?raw",
+      "_i18n-legacy.js?v=7g1BZd2t"
     ]
   },
   "gbviewassess-legacy.html": {
-    "file": "js/gbviewassess-legacy.js?v=CdxzL7tu",
+    "file": "js/gbviewassess-legacy.js?v=Btkl9Coc",
     "name": "gbviewassess",
     "src": "gbviewassess-legacy.html",
     "isEntry": true,
     "imports": [
-      "_i18n-legacy.js?v=Dw3jumlK"
-    ]
-  },
-  "gbviewassess.html": {
-    "file": "js/gbviewassess.js?v=ByKUQ768",
-    "name": "gbviewassess",
-    "src": "gbviewassess.html",
-    "isEntry": true,
-    "imports": [
-      "_i18n.js?v=BgV9XZty"
+      "_i18n-legacy.js?v=7g1BZd2t"
     ]
   },
   "index-legacy.html": {
-    "file": "js/index-legacy.js?v=CAXCNZqx",
+    "file": "js/index-legacy.js?v=DCO0lg-2",
     "name": "index",
     "src": "index-legacy.html",
     "isEntry": true,
     "imports": [
-      "_i18n-legacy.js?v=Dw3jumlK"
+      "_i18n-legacy.js?v=7g1BZd2t"
     ],
     "dynamicImports": [
       "src/views/Videocued-legacy.vue",
-      "src/views/Livepoll-legacy.vue"
-    ]
-  },
-  "index.html": {
-    "file": "js/index.js?v=BmP0WXoG",
-    "name": "index",
-    "src": "index.html",
-    "isEntry": true,
-    "imports": [
-      "_i18n.js?v=BgV9XZty"
-    ],
-    "dynamicImports": [
-      "src/views/Videocued.vue",
-      "src/views/Livepoll.vue"
+      "src/views/Livepoll-legacy.vue",
+      "src/views/Drill-legacy.vue"
     ]
   },
   "src/locales/de-legacy.ftl?raw": {
-    "file": "js/de-legacy.js?v=C4PQXig4",
+    "file": "js/de-legacy.js?v=_Of-kjV-",
     "name": "de",
     "src": "src/locales/de-legacy.ftl?raw",
     "isDynamicEntry": true
   },
-  "src/locales/de.ftl?raw": {
-    "file": "js/de.js?v=DwMpi1Lf",
-    "name": "de",
-    "src": "src/locales/de.ftl?raw",
-    "isDynamicEntry": true
+  "src/views/Drill-legacy.vue": {
+    "file": "js/Drill-legacy.js?v=DpMkutM8",
+    "name": "Drill",
+    "src": "src/views/Drill-legacy.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_i18n-legacy.js?v=7g1BZd2t",
+      "index-legacy.html"
+    ]
   },
   "src/views/Livepoll-legacy.vue": {
-    "file": "js/Livepoll-legacy.js?v=B4Ua4xqi",
+    "file": "js/Livepoll-legacy.js?v=BgJWXXOv",
     "name": "Livepoll",
     "src": "src/views/Livepoll-legacy.vue",
     "isDynamicEntry": true,
     "imports": [
-      "index-legacy.html",
-      "_i18n-legacy.js?v=Dw3jumlK"
-    ]
-  },
-  "src/views/Livepoll.vue": {
-    "file": "js/Livepoll.js?v=B0_NBWS9",
-    "name": "Livepoll",
-    "src": "src/views/Livepoll.vue",
-    "isDynamicEntry": true,
-    "imports": [
-      "index.html",
-      "_i18n.js?v=BgV9XZty"
+      "_i18n-legacy.js?v=7g1BZd2t",
+      "index-legacy.html"
     ]
   },
   "src/views/Videocued-legacy.vue": {
-    "file": "js/Videocued-legacy.js?v=swSBJa-V",
+    "file": "js/Videocued-legacy.js?v=BmX0wfhl",
     "name": "Videocued",
     "src": "src/views/Videocued-legacy.vue",
     "isDynamicEntry": true,
     "imports": [
-      "index-legacy.html",
-      "_i18n-legacy.js?v=Dw3jumlK"
+      "_i18n-legacy.js?v=7g1BZd2t",
+      "index-legacy.html"
+    ]
+  },
+  "vite/legacy-polyfills-legacy": {
+    "file": "js/polyfills-legacy.js?v=BTQcvAWV",
+    "name": "polyfills",
+    "src": "vite/legacy-polyfills-legacy",
+    "isEntry": true
+  },
+  "_i18n.js?v=SXPr93JC": {
+    "file": "js/i18n.js?v=SXPr93JC",
+    "name": "i18n",
+    "dynamicImports": [
+      "src/locales/de.ftl?raw",
+      "_i18n.js?v=SXPr93JC"
+    ]
+  },
+  "gbviewassess.html": {
+    "file": "js/gbviewassess.js?v=Ca7CXuN0",
+    "name": "gbviewassess",
+    "src": "gbviewassess.html",
+    "isEntry": true,
+    "imports": [
+      "_i18n.js?v=SXPr93JC"
+    ]
+  },
+  "index.html": {
+    "file": "js/index.js?v=Uj8N46YA",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_i18n.js?v=SXPr93JC"
+    ],
+    "dynamicImports": [
+      "src/views/Videocued.vue",
+      "src/views/Livepoll.vue",
+      "src/views/Drill.vue"
+    ]
+  },
+  "src/locales/de.ftl?raw": {
+    "file": "js/de.js?v=CGxOM1ke",
+    "name": "de",
+    "src": "src/locales/de.ftl?raw",
+    "isDynamicEntry": true
+  },
+  "src/views/Drill.vue": {
+    "file": "js/Drill.js?v=DzhZMa4t",
+    "name": "Drill",
+    "src": "src/views/Drill.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_i18n.js?v=SXPr93JC",
+      "index.html"
+    ]
+  },
+  "src/views/Livepoll.vue": {
+    "file": "js/Livepoll.js?v=aZrcQNQF",
+    "name": "Livepoll",
+    "src": "src/views/Livepoll.vue",
+    "isDynamicEntry": true,
+    "imports": [
+      "_i18n.js?v=SXPr93JC",
+      "index.html"
     ]
   },
   "src/views/Videocued.vue": {
-    "file": "js/Videocued.js?v=CttZDhdz",
+    "file": "js/Videocued.js?v=Cv2WcSSP",
     "name": "Videocued",
     "src": "src/views/Videocued.vue",
     "isDynamicEntry": true,
     "imports": [
-      "index.html",
-      "_i18n.js?v=BgV9XZty"
+      "_i18n.js?v=SXPr93JC",
+      "index.html"
     ]
   },
   "style.css": {
-    "file": "css/style.css?v=D4qbb996",
+    "file": "css/style.css?v=CtBAmI8-",
     "src": "style.css"
-  },
-  "vite/legacy-polyfills-legacy": {
-    "file": "js/polyfills-legacy.js?v=CEYyf5OG",
-    "name": "polyfills",
-    "src": "vite/legacy-polyfills-legacy",
-    "isEntry": true
   }
 }
