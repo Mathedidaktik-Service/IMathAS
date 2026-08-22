@@ -1,7 +1,6 @@
 /*General settings - fonts, overall page background, etc*/
 body {
-	font-family: Arial, Arial, Helvetica, sans-serif;
-	font-size: 95%;
+	font-family: "Trebuchet MS", "Arial", "Helvetica", sans-serif;
 }
 
 body.fw1000 {
@@ -58,7 +57,7 @@ div.blockitems div.blockitems {
 
 /*Icons*/
 div.icon {
-	color:#00d;	
+	color:#00d;
 	border: 1px solid #00f;
 	font-weight: bolder;
 }
@@ -66,7 +65,7 @@ div.icon {
 /*Breadcrumb bar*/
 div.breadcrumb {
 	/*border: 1px solid #000;*/
-	border: 0px;	
+	border: 0px;
 	background-color: #ddddff;
 }
 
@@ -93,7 +92,7 @@ table.gb thead th, table.gbl thead th, table.gbl thead th.locked {
 	background-color: #eef;
 }
 tr.even, tr.even > * {
-	background-color: #fff;	
+	background-color: #fff;
 }
 tr.odd, tr.odd > * {
 	background-color: #dfd;
@@ -204,12 +203,12 @@ div.seqqinfoinactive {
 
 }
 div.todoquestion {
-	background-color: #ffffcc; 
-	border: 0px; 
+	background-color: #ffffcc;
+	border: 0px;
 }
 /*all questions*/
 div.question {
-	background-color: #ddf; 
+	background-color: #ddf;
 	border: 1px solid #bbd;
 }
 
@@ -240,5 +239,3 @@ span.done {
 a.newnote {
 	font-size: 90%;
 }
-
-
