@@ -20,6 +20,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -130,6 +131,15 @@ if (!$in_practice &&
     $now > $assess_record->getTimeLimitGrace() + 10))
 ) {
   echo '{"error": "timelimit_expired"}';
+  exit;
+}
+
+// reject start if retakewait and not waited
+if (!$in_practice &&
+  !$assess_record->hasActiveAttempt() &&
+  $assess_record->getNextRetaketime() > $now
+) {
+  echo '{"error": "no_retake_wait"}';
   exit;
 }
 
@@ -306,7 +316,7 @@ $include_from_assess_info = array(
   'extended_with', 'timelimit', 'timelimit_type', 'allowed_attempts',
   'showscores', 'intro', 'interquestion_text', 'resources', 'category_urls',
   'help_features', 'points_possible', 'showcat', 'enddate_in', 'displaymethod',
-  'lti_showmsg', 'lti_msgcnt', 'lti_forumcnt'
+  'lti_showmsg', 'lti_msgcnt', 'lti_forumcnt', 'retakewait', 'drillsettings'
 );
 if ($in_practice) {
   array_push($include_from_assess_info, 'showscores', 'allowed_attempts');
@@ -362,12 +372,13 @@ if ($assess_info->getSetting('displaymethod') === 'video_cued') {
 if ($assess_info->getSetting('displaymethod') === 'livepoll') {
   $stm = $DBH->prepare("SELECT curquestion,curstate,seed,startt FROM imas_livepoll_status WHERE assessmentid=:assessmentid");
   $stm->execute(array(':assessmentid'=>$aid));
-  if ($stm->rowCount()==0) {
+  $row = $stm->fetch(PDO::FETCH_ASSOC);
+  if ($row === false) {
     $assessInfoOut['livepoll_status'] = array("curquestion"=>0, "curstate"=>0, "seed"=>0, "startt"=>0);
     $stm = $DBH->prepare("INSERT INTO imas_livepoll_status (assessmentid,curquestion,curstate) VALUES (:assessmentid, :curquestion, :curstate) ON DUPLICATE KEY UPDATE curquestion=curquestion");
     $stm->execute(array(':assessmentid'=>$aid, ':curquestion'=>0, ':curstate'=>0));
   } else {
-    $assessInfoOut['livepoll_status'] = array_map('intval', $stm->fetch(PDO::FETCH_ASSOC));
+    $assessInfoOut['livepoll_status'] = array_map('intval', $row);
 
   }
   $livepollroom = $aid.'-'.($isteacher ? 'teachers':'students');
@@ -386,6 +397,16 @@ $showscores = $assess_info->showScoresDuring();
 $generate_html = ($assess_info->getSetting('displaymethod') == 'full' || !empty($_POST['in_print']));
 $assessInfoOut['questions'] = $assess_record->getAllQuestionObjects($showscores, $generate_html, $generate_html);
 
+// get gen feedback if showing scores
+if ($showscores) {
+  $assessInfoOut['feedback'] = $assess_record->getGenFeedback();
+}
+
+// get single work
+if ($assess_info->getSetting('singleshowwork')) {
+  [$assessInfoOut['swgen'], $assessInfoOut['swgentime']] = $assess_record->getGenShowwork();
+}
+
 // if practice, add that
 $assessInfoOut['in_practice'] = $in_practice;
 
@@ -403,6 +424,9 @@ if ($in_practice) {
 
 //prep date display
 prepDateDisp($assessInfoOut);
+
+// 
+$assessInfoOut['drawalt'] = (($_SESSION['userprefs']['drawentry'] ?? 1)==0);
 
 //output JSON object
 echo json_encode($assessInfoOut, JSON_INVALID_UTF8_IGNORE);

@@ -89,6 +89,24 @@ if ($canviewall) {
 	}
 
 	//Gbmode : Links NC Dates
+	/*gbmode is GFEDCBA where
+		G & 1 is  Try to shorten header names
+		F & 1 is  Show Section Column	
+		F & 2 is  Show Code Column
+		F & 4 is  Show Points (0), Percents (4)
+		E & 3 is  Show pics: none (0), small(1), big (2)
+		E & 4 is  Lock headers: 0 locked, 1 unlocked
+		D & 1 is  Total on right (0), left (1)
+		D & 2 is  Average on bottom (0), top (2)
+		D & 4 is  Last login column: hide (0), show (4)
+		C & 1 is  Links show: full (0), summary (1)
+		C & 2 is  Locked: show (0), hide (2)
+		*C & 4 is  Due date column: hide (0), show (4)  * changed to default
+		B % 3 is  NC assignments: show (0), student visible (cntingb not 0) (1), hide all (2)
+		*B & 4 is  Last change column: hide (0), show (4) * changed to default
+		A     is  Show by availability: Past due (0), Past & Available (1), All (2), Past & Attempted (3), Available only (4)
+	*/
+	$shortenheaders = (((floor($gbmode/1000000)%10)&1)==1);
 	$hidesection = (((floor($gbmode/100000)%10)&1)==1);
 	$hidecode = (((floor($gbmode/100000)%10)&2)==2);
 	$showpercents = (((floor($gbmode/100000)%10)&4)==4)?1:0; //show percents instead of points
@@ -99,9 +117,9 @@ if ($canviewall) {
 	$lastlogin = (((floor($gbmode/1000)%10)&4)==4) ; //0 hide, 2 show last login column
 	$links = ((floor($gbmode/100)%10)&1); //0: view/edit, 1 q breakdown
 	$hidelocked = ((floor($gbmode/100)%10&2)); //0: show locked, 1: hide locked
-	$includeduedate = (((floor($gbmode/100)%10)&4)==4); //0: hide due date, 4: show due date
+	$includeduedate = true; // (((floor($gbmode/100)%10)&4)==4); //0: hide due date, 4: show due date
 	$hidenc = (floor($gbmode/10)%10)%4; //0: show all, 1 stu visisble (cntingb not 0), 2 hide all (cntingb 1 or 2)
-	$includelastchange = (((floor($gbmode/10)%10)&4)==4);  //: hide last change, 4: show last change
+	$includelastchange = true; //(((floor($gbmode/10)%10)&4)==4);  //: hide last change, 4: show last change
 	$availshow = $gbmode%10; //0: past, 1 past&cur, 2 all, 3 past and attempted, 4=current only
 
 	$usefullwidth = false;
@@ -127,8 +145,8 @@ if ($canviewall) {
 	$hidelocked = 0;
 	$showpercents = 0;
 	$lastlogin = false;
-	$includeduedate = false;
-    $includelastchange = false;
+	$includeduedate = true;
+    $includelastchange = true;
     $gbmode = '';
 	$headerlockdef = true;
 	$usefullwidth = false;
@@ -278,7 +296,7 @@ if ($isteacher) {
 			array_push($qarr, $id, 'offline', $stu, $val);
 		}
 		if (count($toins)>0) {
-			$query = "INSERT INTO imas_grades (gradetypeid,gradetype,userid,score) VALUES ".implode(',',$toins);
+			$query = "INSERT INTO imas_grades (gradetypeid,gradetype,userid,score) VALUES ".implode(',',$toins)." ON DUPLICATE KEY UPDATE score=VALUES(score)";
 			$stm = $DBH->prepare($query);
 			$stm->execute($qarr);
 		}
@@ -718,7 +736,7 @@ function gbstudisp($stu) {
 				$hasoutcomes = true;
 			}
 		}
-		$query = "SELECT imas_students.gbcomment,imas_students.gbinstrcomment,imas_users.email,imas_students.latepass,imas_students.section,imas_students.lastaccess FROM imas_students,imas_users WHERE ";
+		$query = "SELECT imas_students.gbcomment,imas_students.gbinstrcomment,imas_users.email,imas_students.latepass,imas_students.section,imas_students.lastaccess,imas_students.latepassmult FROM imas_students,imas_users WHERE ";
 		$query .= "imas_students.userid=imas_users.id AND imas_users.id=:id AND imas_students.courseid=:courseid";
 		$stm = $DBH->prepare($query);
 		$stm->execute(array(':id'=>$stu, ':courseid'=>$_GET['cid']));
@@ -727,7 +745,8 @@ function gbstudisp($stu) {
 			require_once "../footer.php";
 			exit;
 		}
-		list($gbcomment,$gbinstrcomment,$stuemail,$latepasses,$stusection,$lastaccess) = $stm->fetch(PDO::FETCH_NUM);
+		list($gbcomment,$gbinstrcomment,$stuemail,$latepasses,$stusection,$lastaccess,$latepassmult) = $stm->fetch(PDO::FETCH_NUM);
+		$latepasshrs = $latepasshrs * $latepassmult;
 	}
 	$curdir = rtrim(dirname(__FILE__), '/\\');
 
@@ -845,7 +864,7 @@ function gbstudisp($stu) {
 				echo '</div>';
 				echo '</form>';
 			} else {
-				echo "<div style=\"clear:both;display:inline-block\" class=\"cpmid\">" . Sanitize::encodeStringForDisplay($gbcomment) . "</div><br/>";
+				echo "<div style=\"clear:both;\" class=\"tabpanel\">" . Sanitize::encodeStringForDisplay($gbcomment) . "</div><br/>";
 			}
 		}
 		$lpmsg = '';
@@ -884,10 +903,6 @@ function gbstudisp($stu) {
 	if ($stu>0 && $isteacher) {
 		echo '<th>', _('Time Spent (In Questions)'), '</th>';
 		$sarr = "false,'S','N','N','N','N'";
-		if ($includelastchange) {
-			echo '<th>'._('Last Changed').'</th>';
-			$sarr .= ",'D'";
-		}
 	} else if ($stu==-1) {
 		echo '<th>', _('Time Spent (In Questions)'), '</th>';
 		$sarr = "'S','N','N','N','N'";
@@ -895,6 +910,10 @@ function gbstudisp($stu) {
 		$sarr = "'S','N','N','N'";
 	}
 	if ($stu>0) {
+		if ($includelastchange) {
+			echo '<th>'._('Last Changed').'</th>';
+			$sarr .= ",'D'";
+		}
 		if ($includeduedate) {
 			echo '<th>'._('Due Date').'</th>';
 			$sarr .= ",'D'";
@@ -1215,13 +1234,7 @@ function gbstudisp($stu) {
 				} else {
 					echo '<td></td>';
 				}
-				if ($includelastchange) {
-					if (!empty($gbt[1][1][$i][9]) && $gbt[1][1][$i][9]>0) {
-						echo '<td>'.tzdate('n/j/y g:ia', $gbt[1][1][$i][9]);
-					} else {
-						echo '<td></td>';
-					}
-				}
+				
 			} else if ($stu==-1) {
 				if (isset($gbt[1][1][$i][7]) && $gbt[1][1][$i][7]>-1) {
 					echo '<td>'.$gbt[1][1][$i][7].' min ('.$gbt[1][1][$i][8].' min)</td>';
@@ -1230,6 +1243,13 @@ function gbstudisp($stu) {
 				}
 			}
 			if ($stu>0) {
+				if ($includelastchange) {
+					if (!empty($gbt[1][1][$i][9]) && $gbt[1][1][$i][9]>0) {
+						echo '<td>'.tzdate('n/j/y g:ia', $gbt[1][1][$i][9]);
+					} else {
+						echo '<td></td>';
+					}
+				}
 				if ($includeduedate) {
 					if ($gbt[0][1][$i][6]!=1 &&  //skip offline
 						$gbt[0][1][$i][11]<2000000000 && $gbt[0][1][$i][11]>0) {
@@ -1520,14 +1540,14 @@ function gbInstrCatHdrs(&$gbt, &$collapsegbcat) {
 			}
 			echo '><div><span class="cattothdr">';
 			if ($availshow<3) {
-				echo $gbt[0][2][$i][0].'<br/>';
+				echo formatHeaderText($gbt[0][2][$i][0]).'<br/>';
 				if ($gbt[0][4][0]==0) { //using points based
 					echo $gbt[0][2][$i][3+$availshow].'&nbsp;', _('pts');
 				} else {
 					echo $gbt[0][2][$i][11].'%';
 				}
 			} else if ($availshow==3) { //past and attempted
-				echo $gbt[0][2][$i][0];
+				echo formatHeaderText($gbt[0][2][$i][0]);
 				if (isset($gbt[0][2][$i][11])) {
 					echo '<br/>'.$gbt[0][2][$i][11].'%';
 				}
@@ -1658,6 +1678,30 @@ function gbInstrCatCols(&$gbt, $i, $insdiv, $enddiv) {
 	}
 }
 
+function formatHeaderText($text) {
+	global $shortenheaders;
+	$text = trim($text);
+	$base = $text;
+	$sub = '';
+	if ($shortenheaders) {
+		if (($p = strpos($text, ':')) !== false) {
+			$base = trim(substr($text,0,$p));
+			$sub = trim(substr($text,$p+1));
+		} else if (($p = strpos($text, ' - ')) !== false) {
+			$base = trim(substr($text,0,$p));
+			$sub = trim(substr($text,$p+3));
+		} else if ($text[strlen($text)-1]==')' && ($p = strpos($text, '(')) !== false) {
+			$base = trim(substr($text,0,$p));
+			$sub = trim(substr($text,$p+1,-1));
+		}
+	}
+	if ($sub !== '') {
+		return '<span title="'.Sanitize::encodeStringForDisplay($sub).'">'.Sanitize::encodeStringForDisplay($base).'</span>';
+	} else {
+		return Sanitize::encodeStringForDisplay($text);
+	}
+}
+
 function gbinstrdisp() {
 	global $DBH,$hidenc,$showpics,$isteacher,$istutor,$cid,$gbmode,$stu,$availshow,$catfilter,$secfilter,$totonleft,$imasroot,$isdiag,$tutorsection;
 	global $avgontop,$hidelocked,$colorize,$urlmode,$overridecollapse,$includeduedate,$lastlogin,$hidesection,$hidecode,$showpercents,$headerslocked;
@@ -1773,7 +1817,7 @@ function gbinstrdisp() {
 			}
 			//name and points
 			echo '<th class="cat'.($gbt[0][1][$i][1]%10).'" data-pts="'.$gbt[0][1][$i][2].'">';
-			echo '<div>'.$gbt[0][1][$i][0].'<br/>';
+			echo '<div>'.formatHeaderText($gbt[0][1][$i][0]).'<br/>';
 			if ($gbt[0][1][$i][4]==0 || $gbt[0][1][$i][4]==3) {
 				echo $gbt[0][1][$i][2].'&nbsp;', _('pts'), ' ', _('(Not Counted)');
 			} else {

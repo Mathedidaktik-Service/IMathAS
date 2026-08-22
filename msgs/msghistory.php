@@ -24,7 +24,7 @@
 	}
 	$view = 0;
 
-	$cid = Sanitize::courseId($_GET['cid']);
+	$cid = Sanitize::courseId($_GET['cid'] ?? 0);
 	$msgid = Sanitize::onlyInt($_GET['msgid']);
 	$page = Sanitize::onlyInt($_GET['page']);
 	$type =  Sanitize::encodeStringForDisplay($_GET['type']);
@@ -80,13 +80,13 @@
 			if ($msgset==1 && !$isteacher) { //check if sending to teacher
 				$stm = $DBH->prepare("SELECT id FROM imas_teachers WHERE userid=:userid and courseid=:courseid");
 				$stm->execute(array(':userid'=>$otherpartyuserid, ':courseid'=>$line['courseid']));
-				if ($stm->rowCount()==0) {
+				if ($stm->fetch(PDO::FETCH_NUM) === false) {
 					$cansendmsgs = false;
 				}
 			} else if ($msgset==2 && !$isteacher) { //check if sending to stu
 				$stm = $DBH->prepare("SELECT id FROM imas_students WHERE userid=:userid and courseid=:courseid");
 				$stm->execute(array(':userid'=>$otherpartyuserid, ':courseid'=>$line['courseid']));
-				if ($stm->rowCount()==0) {
+				if ($stm->fetch(PDO::FETCH_NUM) === false) {
 					$cansendmsgs = false;
 				}
 			}

@@ -70,12 +70,14 @@ div#headerhome, div#homelinkbox {
 	padding-top: 8px;
 }
 div.itemsum {
-	margin-left: 45px;
+	margin-left: 40px;
+	margin-right: 10px;
 	overflow: auto;
 	padding: 5px 0px;
 	/*margin-top: -.5em;
 	margin-bottom: -.5em;*/
 }
+
 span.iteminfo {
 	margin-left: 30px;
 }
@@ -672,6 +674,15 @@ div.blockwrapper {
 	margin: 0; padding:0;
 }
 
+.stickyonscroll {
+	position: sticky;
+	z-index: 100;
+	top: 0;
+	padding: 5px 0px;
+	background-color: #fff;
+	width: 100%;
+}
+
 div.tips {
  	border: 1px solid #91d5d5;
  	border-radius: 8px;
@@ -727,11 +738,15 @@ ul.tablist {
 	margin: 0;
 	margin-bottom: -1px;
 }
+ul.tablist.stickyonscroll {
+	border-bottom: 1px solid #ccc;
+}
 ul.tablist li {
 	display: inline-block;
 	border: 1px solid #ccc;
 	background-color: #eee;
 	margin-right: 2px;
+	margin-bottom: -1px;
 }
 ul.tablist li a {
 	display: inline-block;
@@ -746,6 +761,7 @@ ul.tablist li.active {
 }
 div.tabpanel {
 	border: 1px solid #ccc;
+	border-top: none;
 	background-color: #fff;
 	margin:0px;
 	padding:5px 10px;
@@ -1175,6 +1191,12 @@ div.multiselitem {
 	color: #757575;
 	cursor: pointer;
 }
+#passkeyRegistrationForm {
+	clear:left; 
+	padding: 5px 15px; 
+	border: 1px solid #ccc; 
+	background: #f9f9f9;
+}
 .ind1 {
 	margin-left: .75em;
 }
@@ -1568,11 +1590,11 @@ fieldset.plain legend {
 	font-weight: normal;
 }
 
-details {
+details:not(.noborder) {
 	border: 1px solid #ccc;
 	padding: 1px 5px;
 }
-details[open] summary {
+details[open]:not(.noborder) summary {
 	border-bottom: 1px solid #ccc;
 }
 /* override MathJax dark mode colors */

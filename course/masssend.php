@@ -23,7 +23,7 @@ require_once '../includes/checkdata.php';
 
 	if (isset($_POST['message'])) {
 		$toignore = array();
-		if (intval($_POST['aidselect'])!=0) {
+		if (!empty($_POST['aidselect'])) {
 			$limitaid = $_POST['aidselect'];
 			$limittype = $_POST['limittype'];
 			$stm = $DBH->prepare("SELECT ver FROM imas_assessments WHERE id=? AND courseid=?");
@@ -78,11 +78,12 @@ require_once '../includes/checkdata.php';
 			$emailaddys = array();
 			$FCMtokens = array();
 			$toarr = [];
+			$fullnames = [];
 			while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 				if (!in_array($row['id'],$toignore)) {
-					$fullnames[$row['id']] = strip_tags($row['LastName']. ', '.$row['FirstName']);
-					$firstnames[$row['id']] = strip_tags($row['FirstName']);
-					$lastnames[$row['id']] = strip_tags($row['LastName']);
+					$fullnames[$row['id']] = Sanitize::encodeStringForDisplay($row['LastName']. ', '.$row['FirstName']);
+					$firstnames[$row['id']] = Sanitize::encodeStringForDisplay($row['FirstName']);
+					$lastnames[$row['id']] = Sanitize::encodeStringForDisplay($row['LastName']);
 
 					if ($row['msgnotify']==1 && $row['email']!='' && $row['email']!='none@none.com') {
 						$emailaddys[$row['id']] = Sanitize::simpleASCII("{$row['FirstName']} {$row['LastName']}"). ' <'. Sanitize::emailAddress($row['email']) .'>';
@@ -169,9 +170,9 @@ require_once '../includes/checkdata.php';
 			while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 				if (!in_array($row['id'],$toignore) && $row['email']!='' && $row['email']!='none@none.com') {
 					$emailaddys[] = Sanitize::simpleASCII("{$row['FirstName']} {$row['LastName']}"). ' <'. Sanitize::emailAddress($row['email']) .'>';
-					$firstnames[] = $row['FirstName'];
-					$lastnames[] = $row['LastName'];
-					$fullnames[] = $row['LastName'].', '.$row['FirstName'];
+					$firstnames[] = Sanitize::encodeStringForDisplay($row['FirstName']);
+					$lastnames[] = Sanitize::encodeStringForDisplay($row['LastName']);
+					$fullnames[] = Sanitize::encodeStringForDisplay($row['LastName'].', '.$row['FirstName']);
 				}
 			}
 

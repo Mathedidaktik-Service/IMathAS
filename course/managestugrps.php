@@ -169,7 +169,8 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				$stm->execute($insarr);
 				$stm = $DBH->prepare("SELECT id,ver FROM imas_assessments WHERE groupsetid=:groupsetid AND courseid=:courseid");
 				$stm->execute(array(':groupsetid'=>$grpsetid, ':courseid'=>$cid));
-				while ((list($aid,$aver) = $stm->fetch(PDO::FETCH_NUM)) && $grpsetid>0) {
+				while (($row = $stm->fetch(PDO::FETCH_NUM)) && $grpsetid>0) {
+					list($aid,$aver) = $row;
 					//if asid exists for this grpid, need to update students.
 					//if no asid exists already, but the students we're adding have one, use one (which?) of theirs
 					//otherwise do nothing
@@ -186,9 +187,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 					}
 					$stm2 = $DBH->prepare($query);
 					$stm2->execute(array(':agroupid'=>$grpid, ':assessmentid'=>$aid));
-					if ($stm2->rowCount()>0) {
+					$rowgrptest = $stm2->fetch(PDO::FETCH_ASSOC);
+					if ($rowgrptest !== false) {
 						//asid already exists for group - use it
-						$rowgrptest = $stm2->fetch(PDO::FETCH_ASSOC);
 						$grpasidexists = true;
 					} else {
 						//use asid from first student assessment
@@ -202,9 +203,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 						}
 						$stm2 = $DBH->prepare($query);
 						$stm2->execute(array(':assessmentid'=>$aid));
-						if ($stm2->rowCount()>0) {
+						$rowgrptest = $stm2->fetch(PDO::FETCH_ASSOC);
+						if ($rowgrptest !== false) {
 							// first student - grab their data to copy to others
-							$rowgrptest = $stm2->fetch(PDO::FETCH_ASSOC);
 
 							// remaining students: delete any files in their existing records
 							// since we'll be overwriting them
@@ -235,9 +236,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 								$stm2 = $DBH->prepare("SELECT id,agroupid FROM imas_assessment_sessions WHERE userid=:userid AND assessmentid=:assessmentid");
 							}
 							$stm2->execute(array(':userid'=>$stuid, ':assessmentid'=>$aid));
-							if ($stm2->rowCount()>0) {
+							$row = $stm2->fetch(PDO::FETCH_NUM);
+							if ($row !== false) {
 								$loginfo .= "updating ias for $stuid.";
-								$row = $stm2->fetch(PDO::FETCH_NUM);
 								$sets = array();
 								foreach ($fieldstocopyarr as $k=>$val) {
 									$sets[] = "$val=:$val";
@@ -324,7 +325,11 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				JOIN imas_stugroupset AS gset ON grp.groupsetid=gset.id
 				WHERE grp.id=:id");
 			$stm->execute(array(':id'=>$delgrp));
-			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM);
+			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
+			if ($page_grpname === null) {
+				echo 'Invalid group';
+				exit;
+			}
 		}
 		$curBreadcrumb .= " &gt; <a href=\"managestugrps.php?cid=$cid\">Manage Student Groups</a> &gt; <a href=\"managestugrps.php?cid=$cid&grpsetid=$grpsetid\">".Sanitize::encodeStringForDisplay($page_grpsetname)."</a> &gt; Delete Group";
 	} else if (isset($_GET['addrandgrps'])) {
@@ -332,7 +337,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 		if (isset($_POST['grpsize']) && intval($_POST['grpsize'])>0) {
 			$stm = $DBH->prepare("SELECT id FROM imas_stugroups WHERE groupsetid=?");
 			$stm->execute(array($grpsetid));
-			if ($stm->rowCount()==0) { //check there's no existing groups;
+			if ($stm->fetch(PDO::FETCH_NUM) === false) { //check there's no existing groups;
 				if (isset($_POST['inclocked'])) {
 					$stm = $DBH->prepare("SELECT userid,section FROM imas_students WHERE courseid=?");
 				} else {
@@ -348,6 +353,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
                 foreach ($stuallsecs as $sec=>$stus) {
                     shuffle($stus);
                     $n = count($stus);
+					if ($n == 0) { continue; } // no one to assign
                     $grpn = intval(Sanitize::onlyInt($_POST['grpsize']));
                     $rem = $n%$grpn;
                     if ($_POST['grpadj']==0 || ($_POST['grpadj']==2 && $rem>=$grpn/2)) {
@@ -389,9 +395,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			$stm->execute(array(':id'=>$grpsetid));
 			$page_grpsetname = $stm->fetchColumn(0);
 
-            $stm = $DBH->prepare("SELECT DISTINCT section FROM imas_students WHERE imas_students.courseid=:courseid AND imas_students.section IS NOT NULL ORDER BY section");
+            $stm = $DBH->prepare("SELECT COUNT(DISTINCT section) FROM imas_students WHERE imas_students.courseid=:courseid AND imas_students.section IS NOT NULL");
             $stm->execute(array(':courseid'=>$cid));
-            $hassection = ($stm->rowCount()>1);
+            $hassection = ($stm->fetchColumn(0)>1);
 
 			$curBreadcrumb .= " &gt; <a href=\"managestugrps.php?cid=$cid\">Manage Student Groups</a> &gt; <a href=\"managestugrps.php?cid=$cid&grpsetid=$grpsetid\">".Sanitize::encodeStringForDisplay($page_grpsetname)."</a> &gt; Create Random Groups";
 		}
@@ -412,7 +418,11 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				JOIN imas_stugroupset AS gset ON grp.groupsetid=gset.id
 				WHERE grp.id=:id");
 			$stm->execute(array(':id'=>$renGrp));
-			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM);
+			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
+			if ($page_grpname === null) {
+				echo 'Invalid group';
+				exit;
+			}
 		}
 		$curBreadcrumb .= " &gt; <a href=\"managestugrps.php?cid=$cid\">Manage Student Groups</a> &gt; <a href=\"managestugrps.php?cid=$cid&grpsetid=$grpsetid\">".Sanitize::encodeStringForDisplay($page_grpsetname)."</a> &gt; Rename Group";
 	} else if (isset($_GET['removeall'])) {
@@ -430,7 +440,11 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				JOIN imas_stugroupset AS gset ON grp.groupsetid=gset.id
 				WHERE grp.id=:id");
 			$stm->execute(array(':id'=>$removeall));
-			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM);
+			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
+			if ($page_grpname === null) {
+				echo 'Invalid group';
+				exit;
+			}
 		}
 		$curBreadcrumb .= " &gt; <a href=\"managestugrps.php?cid=$cid\">Manage Student Groups</a> &gt; <a href=\"managestugrps.php?cid=$cid&grpsetid=$grpsetid\">".Sanitize::encodeStringForDisplay($page_grpsetname)."</a> &gt; Remove all group members";
 
@@ -448,13 +462,17 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			$stm = $DBH->prepare("SELECT iu.LastName, iu.FirstName FROM imas_users AS iu
 				JOIN imas_students AS istu ON istu.userid=iu.id WHERE iu.id=:id AND istu.courseid=:cid");
 			$stm->execute(array(':id'=>$remove, ':cid' => $cid));
-			$page_stuname = implode(', ', $stm->fetch(PDO::FETCH_NUM));
+			$page_stuname = implode(', ', $stm->fetch(PDO::FETCH_NUM) ?: ['','']);
 			$stm = $DBH->prepare("SELECT grp.name AS grpname, gset.name AS grpsetname 
 				FROM imas_stugroups AS grp 
 				JOIN imas_stugroupset AS gset ON grp.groupsetid=gset.id
 				WHERE grp.id=:id");
 			$stm->execute(array(':id'=>$remove));
-			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM);
+			list($page_grpname,$page_grpsetname) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null];
+			if ($page_grpname === null) {
+				echo 'Invalid group';
+				exit;
+			}
 		}
 		$curBreadcrumb .= " &gt; <a href=\"managestugrps.php?cid=$cid\">Manage Student Groups</a> &gt; <a href=\"managestugrps.php?cid=$cid&grpsetid=$grpsetid\">".Sanitize::encodeStringForDisplay($page_grpsetname)."</a> &gt; Remove group member";
 
@@ -486,9 +504,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 		$grpids = implode(',',array_keys($page_grps));
 
 		natsort($page_grps);
-		$stm = $DBH->prepare("SELECT DISTINCT section FROM imas_students WHERE imas_students.courseid=:courseid AND imas_students.section IS NOT NULL ORDER BY section");
+		$stm = $DBH->prepare("SELECT COUNT(DISTINCT section) FROM imas_students WHERE imas_students.courseid=:courseid AND imas_students.section IS NOT NULL");
 		$stm->execute(array(':courseid'=>$cid));
-        $hassection = ($stm->rowCount()>1);
+        $hassection = ($stm->fetchColumn(0)>1);
 
 		if ($hassection) {
 			$stm = $DBH->prepare("SELECT usersort FROM imas_gbscheme WHERE courseid=:courseid");
@@ -526,6 +544,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
 				if (!isset($page_grpmembers[$row[0]])) {
 					$page_grpmembers[$row[0]] = array();
+				}
+				if (!isset($stunames[$row[1]])) { 
+					continue; // non-student in imas_stugroupmembers. Shouldn't happen, but ignore them
 				}
 				$page_grpmembers[$row[0]][$row[1]] = $stunames[$row[1]];
 				$stuuseridsingroup[] = $row[1];

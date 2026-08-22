@@ -390,6 +390,26 @@ function showplot($funcs) { //optional arguments:  $xmin,$xmax,$ymin,$ymax,label
             $alt .= "<tr><td>$val</td><td>$thisymax</td></tr>";
             $alt .= '</tbody></table>';
             $path .= "line([$val,$thisymin],[$val,$thisymax]);";
+            if (isset($function[5]) && $function[5] == 'open') {
+                $path .= "dot([$val,$thisymax],\"open\");";
+                $alt .= "Open dot at ($val,$thisymax). ";
+            } else if (isset($function[5]) && $function[5] == 'closed') {
+                $path .= "dot([$val,$thisymax],\"closed\");";
+                $alt .= "Closed dot at ($val,$thisymax). ";
+            } else if (isset($function[5]) && $function[5] == 'arrow') {
+                $path .= "arrowhead([$val,$thisymin],[$val,$thisymax]);";
+                $alt .= "Arrow at ($val,$thisymax). ";
+            }
+            if (isset($function[4]) && $function[4] == 'open') {
+                $path .= "dot([$val,$thisymin],\"open\");";
+                $alt .= "Open dot at ($val,$thisymin). ";
+            } else if (isset($function[4]) && $function[4] == 'closed') {
+                $path .= "dot([$val,$thisymin],\"closed\");";
+                $alt .= "Closed dot at ($val,$thisymin). ";
+            } else if (isset($function[4]) && $function[4] == 'arrow') {
+                $path .= "arrowhead([$val,$thisymax],[$val,$thisymin]);";
+                $alt .= "Arrow at ($val,$thisymin). ";
+            }
             if ($isineq) {
                 $path .= "stroke=\"none\";strokedasharray=\"none\";";
                 if (isset($function[1]) && ($function[1] == 'red' || $function[1] == 'green')) {
@@ -813,9 +833,13 @@ function replacealttext($plot, $alttext) {
     }
 }
 
-function addlabel($plot, $x, $y, $lbl, $color = "black", $loc = "", $angle = 0, $size = 0) {
+function addlabel($plot, $x, $y, $lbl, $color = "black", $loc = "", $angle = 0, $size = 0, $alt = null) {
     if ($_SESSION['graphdisp'] == 0) {
-        return $plot .= "Label &quot;$lbl&quot; at ($x,$y). ";
+        if ($alt === null) {
+            return $plot . "Label &quot;$lbl&quot; at ($x,$y). ";
+        } else {
+            return $plot . $alt;
+        }
     }
     $lbl = str_replace("'", '&apos;', $lbl);
     $lbl = str_replace('"', '\\"', $lbl);
@@ -835,23 +859,19 @@ function addlabel($plot, $x, $y, $lbl, $color = "black", $loc = "", $angle = 0, 
     $plot = str_replace("' />", "$outstr' />", $plot);
     return $plot;
 }
-function addlabelabs($plot, $x, $y, $lbl) {
-    if (func_num_args() > 4) {
-        $color = func_get_arg(4);
-    } else {
-        $color = "black";
-    }
+function addlabelabs($plot, $x, $y, $lbl, $color='black', $loc='', $angle='', $alt=null) {
     if ($_SESSION['graphdisp'] == 0) {
-        return $plot .= "Label &quot;$lbl&quot; at pixel coordinates ($x,$y).";
+        if ($alt === null) {
+            return $plot . "Label &quot;$lbl&quot; at pixel coordinates ($x,$y). ";
+        } else {
+            return $plot . $alt;
+        }  
     }
     $lbl = str_replace("'", '&apos;', $lbl);
     $lbl = str_replace('"', '\\"', $lbl);
-    if (func_num_args() > 6) {
-        $loc = func_get_arg(5);
-        $angle = func_get_arg(6);
+    if ($angle !== '') {
         $plot = str_replace("' />", "fontfill=\"$color\";textabs([$x,$y],\"$lbl\",\"$loc\",\"$angle\");' />", $plot);
-    } elseif (func_num_args() > 5) {
-        $loc = func_get_arg(5);
+    } elseif ($loc !== '') {
         $plot = str_replace("' />", "fontfill=\"$color\";textabs([$x,$y],\"$lbl\",\"$loc\");' />", $plot);
     } else {
         $plot = str_replace("' />", "fontfill=\"$color\";textabs([$x,$y],\"$lbl\");' />", $plot);
@@ -865,7 +885,7 @@ function adddrawcommand($plot, $cmd) {
     if (preg_match("/'(\s+alt=\"[^\"]*\")?\s*\/>/", $cmd, $m)) {
         $end = $m[0];
     }
-    return str_replace("' />", $cmd . $end, $plot);
+    return str_replace("' />", Sanitize::encodeStringForDisplay($cmd) . $end, $plot);
 }
 
 function mergeplots($plota) {
@@ -960,21 +980,30 @@ function addfractionaxislabels($plot, $step, $axis = "x") {
         } else {
             $ld = $n;
         }
-        if ($d != 1) {
-            $ld .= "/$d";
-        }
-        if ($axis === 'x') {
-            $outst .= "line([$av,$tm],[$av,$tx]); text([$av,$tm],\"$ld\",\"below\");";
-        } else if ($axis === 'y') {
-            $outst .= "line([$tm,$av],[$tx,$av]); text([$tm,$av],\"$ld\",\"left\");";
+        
+        if (($_SESSION['graphdisp']??0)==1) {
+            if ($axis === 'x') {
+                $outst .= "line([$av,$tm],[$av,$tx]); textfrac([$av,$tm],\"$ld\",$d,\"below\");";
+            } else if ($axis === 'y') {
+                $outst .= "line([$tm,$av],[$tx,$av]); textfrac([$tm,$av],\"$ld\",$d,\"left\");";
+            }
+        } else {
+            if ($d != 1) {
+                $ld .= "/$d";
+            }
+            if ($axis === 'x') {
+                $outst .= "line([$av,$tm],[$av,$tx]); text([$av,$tm],\"$ld\",\"below\");";
+            } else if ($axis === 'y') {
+                $outst .= "line([$tm,$av],[$tx,$av]); text([$tm,$av],\"$ld\",\"left\");";
+            }
         }
         $step++;
     }
     // suppress the default axis labels by changing the dx/dy to negative
     if ($axis === 'x') {
-        $plot = preg_replace('/axes\(.*?,/', 'axes(-1,', $plot);
+        $plot = preg_replace('/axes\(.*?,/', 'axes(-100,', $plot);
     } else if ($axis === 'y') {
-        $plot = preg_replace('/axes\((.*?),.*?,/', 'axes($1,-1,', $plot);
+        $plot = preg_replace('/axes\((.*?),.*?,/', 'axes($1,-100,', $plot);
     }
     return str_replace("' />", "$outst' />", $plot);
 }
@@ -1053,13 +1082,14 @@ function showasciisvg($script, $width = 200, $height = 200, $alt = null) {
             $script[$i] = ' ';
         }
     }
+    $script = str_replace("'", '"', $script);
+    $script = Sanitize::encodeStringForDisplay($script);
     if ($alt === null) {
         $alt = "[Graphs generated by this script: $script]";
     }
     if ($_SESSION['graphdisp'] == 0) {
         return $alt;
     }
-    $script = str_replace("'", '"', $script);
     $out = "<embed type='image/svg+xml' align='middle' width='$width' height='$height' script='$script' />";
     if (empty($GLOBALS['hide-sronly'])) {
         $out .= '<span class="sr-only">' . $alt . '</span>';
@@ -1107,6 +1137,9 @@ function arraystodoteqns($x, $y, $color = 'blue') {
 function textonimage() {
     $args = func_get_args();
     $img = array_shift($args);
+    if (count($args)==1 && is_array($args[0])) {
+        $args = $args[0];
+    }
 
     if (substr($img, 0, 4) == 'http') {
         $img = '<img src="' . Sanitize::encodeStringForDisplay($img) . '" alt="" />';
@@ -1115,8 +1148,13 @@ function textonimage() {
     $out = '<div style="position: relative;" class="txtimgwrap">';
     $out .= '<div class="txtimgwrap" style="position:relative;top:0px;left:0px;">' . $img . '</div>';
 
+    $align = '';
     while (count($args) > 2) {
         $text = array_shift($args);
+        if ($text == "centerelements") {
+            $align = 'transform:translate(-50%,-50%);';
+            continue;
+        }
         $left = array_shift($args);
         $top = array_shift($args);
         $hidden = (strpos($text, '[AB') === false) ? 'aria-hidden=true' : '';
@@ -1125,7 +1163,7 @@ function textonimage() {
                 $out .= "<span>$text</span>";
             }
         } else {
-            $out .= "<div $hidden style=\"position:absolute;top:{$top}px;left:{$left}px;\">$text</div>";
+            $out .= "<div $hidden style=\"position:absolute;top:{$top}px;left:{$left}px;{$align}\">$text</div>";
         }
     }
     $out .= '</div>';

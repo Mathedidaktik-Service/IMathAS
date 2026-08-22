@@ -102,7 +102,7 @@ class AssessInfo
     } else if (!$isstu) {
       $this->setException($uid, false, $isstu, $latepasses, $latepasshrs, $courseenddate);
     } else {
-      $query = "SELECT startdate,enddate,islatepass,is_lti,exceptionpenalty,waivereqscore,timeext,attemptext ";
+      $query = "SELECT startdate,enddate,islatepass,is_lti,exceptionpenalty,exceptionpenaltyinterval,exceptionpenaltyscope,manualexceptionend,waivereqscore,timeext,attemptext ";
       $query .= "FROM imas_exceptions WHERE userid=? AND assessmentid=? AND itemtype='A'";
       $stm = $this->DBH->prepare($query);
       $stm->execute(array($uid, $this->curAid));
@@ -127,7 +127,8 @@ class AssessInfo
         $courseenddate = $GLOBALS['courseenddate'] ?? 2000000000;
     }
     // resets, in case we're using setException multiple times
-    $resetkeys = ['exceptionpenalty','original_enddate','extended_with',
+    $resetkeys = ['overridepenalty','overrideinterval','overridescope','manualexceptionend',
+        'current_late_penalty_pct','active_late_penalty','original_enddate','extended_with',
         'timeext','attemptext', 'startdate', 'enddate', 'enddate_in',
         'latepasses_avail', 'latepass_extendto', 'latepass_enddate'];
     if (empty($this->resetdata)) { // set reset data on first run
@@ -154,9 +155,35 @@ class AssessInfo
     $this->assessData['hasexception'] = ($this->exception !== false);
 
     if ($this->exception !== false && isset($this->exception['exceptionpenalty']) && $this->exception['exceptionpenalty'] !== null) {
-      //override default exception penalty
-      $this->assessData['exceptionpenalty'] = $this->exception['exceptionpenalty'];
-    } 
+      //per-student override of the default exception/latepass penalty. Note assessData's
+      //own 'exceptionpenalty'/'exceptionpenaltyinterval' are left as the assessment's
+      //default - the override is tracked separately so scope-aware calculations (see
+      //getLatePenaltyParams()) can consider both the override and the default.
+      $this->assessData['overridepenalty'] = $this->exception['exceptionpenalty'];
+      $this->assessData['overrideinterval'] = $this->exception['exceptionpenaltyinterval'] ?? 0;
+      $this->assessData['overridescope'] = $this->exception['exceptionpenaltyscope'] ?? 'both';
+      $this->assessData['manualexceptionend'] = isset($this->exception['manualexceptionend']) ? intval($this->exception['manualexceptionend']) : null;
+    }
+
+    //precompute the currently-effective late penalty (using the true original due date,
+    //before assessData['enddate'] potentially gets swapped below to a latepass-extended date)
+    $origEnddate = $this->assessData['enddate'];
+    $defaultPenalty = $this->assessData['exceptionpenalty'] ?? 0;
+    $defaultInterval = $this->assessData['exceptionpenaltyinterval'] ?? 0;
+    $overridePenalty = $this->assessData['overridepenalty'] ?? null;
+    $overrideInterval = $this->assessData['overrideinterval'] ?? null;
+    $overrideScope = $this->assessData['overridescope'] ?? 'both';
+    $manualExceptionEnd = $this->assessData['manualexceptionend'] ?? null;
+    $now = time();
+    $this->assessData['current_late_penalty_pct'] = ExceptionFuncs::calcEffectiveLatePenaltyPct(
+      $now, $origEnddate, $defaultPenalty, $defaultInterval,
+      $overridePenalty, $overrideInterval, $overrideScope, $manualExceptionEnd
+    );
+    if ($overridePenalty !== null && ($overrideScope !== 'exception_only' || $manualExceptionEnd === null || $now <= $manualExceptionEnd)) {
+      $this->assessData['active_late_penalty'] = ['penalty'=>$overridePenalty, 'interval'=>$overrideInterval];
+    } else {
+      $this->assessData['active_late_penalty'] = ['penalty'=>$defaultPenalty, 'interval'=>$defaultInterval];
+    }
 
     if ($this->exception !== false && isset($this->exception['waivereqscore']) && ($this->exception['waivereqscore']&2) == 2) {
       //remove work cutoff
@@ -296,6 +323,7 @@ class AssessInfo
   */
   public function loadQuestionSettings($qids = 'all', $get_code = false, $get_cats = true) {
     if (is_array($qids)) {
+      if (count($qids) == 0) { return; }
       $ph = Sanitize::generateQueryPlaceholders($qids);
       $stm = $this->DBH->prepare("SELECT * FROM imas_questions WHERE id IN ($ph)");
       $stm->execute(array_values($qids));
@@ -423,6 +451,9 @@ class AssessInfo
     if (isset($this->assessData['textmap'][$id])) {
         $out['text'] = $this->assessData['textmap'][$id];
     }
+    // Note: 'dispname' for drill mode is computed in AssessRecord::getQuestionObject()
+    // instead of here, since group/pool questions need the question NUMBER (not just
+    // the qid) to compute a stable per-slot numbered label - see getDrillDispname().
     return $out;
   }
 
@@ -439,6 +470,24 @@ class AssessInfo
     } else {
       return false;
     }
+  }
+
+  /**
+   * Get the late-penalty settings needed to resolve the effective penalty at any
+   * given submission timestamp (assessment default + optional per-student override).
+   * Pass these (in order) to ExceptionFuncs::calcEffectiveLatePenaltyPct().
+   * @return array [defaultPenalty, defaultInterval, overridePenalty, overrideInterval,
+   *                overrideScope, manualExceptionEnd]
+   */
+  public function getLatePenaltyParams() {
+    return [
+      $this->assessData['exceptionpenalty'] ?? 0,
+      $this->assessData['exceptionpenaltyinterval'] ?? 0,
+      $this->assessData['overridepenalty'] ?? null,
+      $this->assessData['overrideinterval'] ?? null,
+      $this->assessData['overridescope'] ?? 'both',
+      $this->assessData['manualexceptionend'] ?? null,
+    ];
   }
 
   /**
@@ -632,40 +681,16 @@ class AssessInfo
    */
   public function checkPrereq($uid) {
     if ($this->assessData['available'] == 'practice') { return; } // don't block in practice mode
-    if ($this->assessData['reqscore'] > 0 &&
-        $this->assessData['reqscoreaid'] > 0 &&
+    if ($this->assessData['reqscorejson'] != '' &&
         !$this->waiveReqScore()
     ) {
-      $stm = $this->DBH->prepare("SELECT id FROM imas_excused WHERE userid=? AND type='A' AND typeid=?");
-      $stm->execute(array($uid, $this->assessData['reqscoreaid']));
-      if ($stm->rowCount() > 0) {
-          // has excusal for prereq - ignore prereq score
-          return;
-      }
+      require_once '../includes/reqscorefuncs.php';
 
-      $query = "SELECT iar.score,ia.ptsposs,ia.name FROM imas_assessments AS ia LEFT JOIN ";
-			$query .= "imas_assessment_records AS iar ON iar.assessmentid=ia.id AND iar.userid=? ";
-			$query .= "WHERE ia.id=?";
-      $stm = $this->DBH->prepare($query);
-      $stm->execute(array($uid, $this->assessData['reqscoreaid']));
-      list($prereqscore,$reqscoreptsposs,$prereqname) = $stm->fetch(PDO::FETCH_NUM);
-      if ($prereqscore === null) {
-				$isBlocked = true;
-			} else {
-        $isBlocked = false;
-        if ($this->assessData['reqscoretype']&2) { //using percent-based
-            if ($reqscoreptsposs>0 && round(100*$prereqscore/$reqscoreptsposs,1)+.02<abs($this->assessData['reqscore'])) {
-                $isBlocked = true;
-            }
-        } else if ($prereqscore+.02<abs($this->assessData['reqscore'])) { //points based
-            $isBlocked = true;
-        }
-      }
-      if ($isBlocked) {
+      [$meetsPrereq, $prereqStr] = meetsReqScore(json_decode($this->assessData['reqscorejson'],true), true);
+      
+      if (!$meetsPrereq) {
         $this->assessData['available'] = 'needprereq';
-        $this->assessData['reqscorename'] = $prereqname;
-        $this->assessData['reqscorevalue'] = ($this->assessData['reqscore']) .
-          (($this->assessData['reqscoretype']&2) ? '%' : ' '._('points'));
+        $this->assessData['reqscorevalue'] = $prereqStr;
       }
     }
   }
@@ -780,11 +805,11 @@ class AssessInfo
       }
     }
 
-    if ($this->assessData['shuffle']&16) {
+    if ($this->assessData['shuffle']&16 && count($qout)>0) {
         //shuffle all but first
         $firstq = array_shift($qout);
     }
-    if ($this->assessData['shuffle']&32) {
+    if ($this->assessData['shuffle']&32 && count($qout)>0) {
         //shuffle all but last
         $lastq = array_pop($qout);
     }
@@ -814,10 +839,10 @@ class AssessInfo
             $RND->shuffle($qout);
           }
     }
-    if ($this->assessData['shuffle']&16) {
+    if ($this->assessData['shuffle']&16 && !empty($firstq)) {
       array_unshift($qout, $firstq);
     }
-    if ($this->assessData['shuffle']&32) {
+    if ($this->assessData['shuffle']&32 && !empty($lastq)) {
         array_push($qout, $lastq);
     }
 
@@ -1164,7 +1189,11 @@ class AssessInfo
     }
 
     if ($settings['showwork'] == -1) {
-      $settings['showwork'] = $defaults['showwork'];
+      if ($defaults['singleshowwork']&8) { // single; no question
+        $settings['showwork'] = 0; 
+      } else {
+        $settings['showwork'] = $defaults['showwork'];
+      }
     }
 
     if (!empty($settings['fixedseeds'])) {
@@ -1280,6 +1309,7 @@ class AssessInfo
 
     //unpack noprint
     $settings['lock_for_assess'] = ($settings['noprint'] & 2);
+    $settings['no_detailed_soln'] = ($settings['noprint'] & 4);
     $settings['noprint'] = ($settings['noprint'] & 1);
 
     //unpack intro
@@ -1315,6 +1345,20 @@ class AssessInfo
       }
     }
     unset($settings['extrefs']);
+
+    //unpack drilljson
+    $settings['drillsettings'] = array('style' => 'time_maxcorrect', 'n' => 10, 'dispnames' => new stdClass());
+    if ($settings['displaymethod'] === 'drill' && $settings['drilljson'] != '') {
+      $dj = json_decode($settings['drilljson'], true);
+      if (is_array($dj)) {
+        $settings['drillsettings']['style'] = $dj['style'] ?? 'time_maxcorrect';
+        $settings['drillsettings']['n'] = intval($dj['n'] ?? 10);
+        if (!empty($dj['dispnames'])) {
+          $settings['drillsettings']['dispnames'] = $dj['dispnames'];
+        }
+      }
+    }
+    unset($settings['drilljson']);
 
     // handle help features
     $settings['help_features'] = array(
@@ -1357,10 +1401,10 @@ class AssessInfo
     }
 
     // fix old-format reqscore "grey out"
-    if ($settings['reqscore'] < 0) {
+    /*if ($settings['reqscore'] < 0) {
         $settings['reqscoretype'] |= 1;
         $settings['reqscore'] = abs($settings['reqscore']);
-    }
+    }*/
 
     // parse out earlybonus parts
     if (!isset($settings['earlybonus'])) {
@@ -1403,14 +1447,16 @@ class AssessInfo
                 'type' => 'pool',
                 'n' => 1,
                 'replace' => 0,
-                'qids' => array_map('intval', $sub)
+                'qids' => array_map('intval', $sub),
+                'grouplabel' => ''
                 );
             } else {
                 $order[$k] = array(
                 'type' => 'pool',
                 'n' => $pts[0],
                 'replace' => ($pts[1]==1),
-                'qids' => array_map('intval', array_slice($sub, 1))
+                'qids' => array_map('intval', array_slice($sub, 1)),
+                'grouplabel' => $pts[2] ?? ''
                 );
             }
             } else {
@@ -1433,6 +1479,7 @@ class AssessInfo
     }
 
     $settings['showworktype'] = ($settings['showwork'] & 4);
+    $settings['singleshowwork'] = ($settings['showwork'] & 11);
     $settings['showwork'] = ($settings['showwork'] & 3);
 
     return $settings;

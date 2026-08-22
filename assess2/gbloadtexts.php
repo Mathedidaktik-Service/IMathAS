@@ -13,6 +13,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -27,7 +28,7 @@ $aid = Sanitize::onlyInt($_GET['aid']);
 //load settings without questions
 $assess_info = new AssessInfo($DBH, $aid, $cid, false);
 
-$assessInfoOut = $assess_info->extractSettings(['intro', 'interquestion_text']);
+$assessInfoOut = $assess_info->extractSettings(['intro', 'interquestion_text', 'resources']);
 
 //output JSON object
 echo json_encode($assessInfoOut, JSON_INVALID_UTF8_IGNORE);

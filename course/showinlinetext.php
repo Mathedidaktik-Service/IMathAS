@@ -22,7 +22,7 @@
 		
 	$stm = $DBH->prepare("SELECT text,title,fileorder FROM imas_inlinetext WHERE id=:id AND courseid=:cid");
 	$stm->execute(array(':id'=>$inlinetextid, ':cid'=>$cid));
-	list($text,$title,$fileorder) = $stm->fetch(PDO::FETCH_NUM);
+	list($text,$title,$fileorder) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null,null];
 	if ($text === null || $text === false) {
 		echo "Invalid ID";
 		exit;
@@ -40,14 +40,15 @@
 	
 	$stm = $DBH->prepare("SELECT id,description,filename FROM imas_instr_files WHERE itemid=:itemid");
 	$stm->execute(array(':itemid'=>$inlinetextid));
-	if ($stm->rowCount()>0) {
+	$row = $stm->fetch(PDO::FETCH_NUM);
+	if ($row !== false) {
 	   echo '<ul class="fileattachlist">';
 	   $filenames = array();
 	   $filedescr = array();
-	   while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+	   do {
 		   $filenames[$row[0]] = $row[2];
 		   $filedescr[$row[0]] = $row[1];
-	   }
+	   } while ($row = $stm->fetch(PDO::FETCH_NUM));
 	   foreach (explode(',',$fileorder) as $fid) {
 		   //echo "<li><a href=\"$imasroot/course/files/{$filenames[$fid]}\" target=\"_blank\">{$filedescr[$fid]}</a></li>";
 		   echo "<li><a href=\"".getcoursefileurl($filenames[$fid])."\" target=\"_blank\">".Sanitize::encodeStringForDisplay($filedescr[$fid])."</a></li>";

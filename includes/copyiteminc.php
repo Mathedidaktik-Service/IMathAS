@@ -2,6 +2,9 @@
 
 require_once __DIR__ . "/updateptsposs.php";
 require_once __DIR__ . "/migratesettings.php";
+require_once __DIR__ . "/reqscorefuncs.php";
+require_once __DIR__ . "/courselinkinc.php";
+
 //boost operation time
 
 //Look to see if a hook file is defined, and include if it is
@@ -23,6 +26,7 @@ $assessnewid = array();
 $exttooltrack = array();
 $itemtypemap = array();
 $autoexcusetrack = array();
+$blockidmap = array(); // old block 'id' => new block 'id'
 if (!isset($replacebyarr)) {
     $replacebyarr = array();
 }
@@ -54,8 +58,9 @@ function copyitem($itemid, $gbcats = false, $sethidden = false)
     $now = time();
     $stm = $DBH->prepare("SELECT itemtype,typeid,courseid FROM imas_items WHERE id=:id");
     $stm->execute(array(':id' => $itemid));
-    if ($stm->rowCount() == 0) {return false;}
-    list($itemtype, $typeid, $sourcecid) = $stm->fetch(PDO::FETCH_NUM);
+    $row = $stm->fetch(PDO::FETCH_NUM);
+    if ($row === false) {return false;}
+    list($itemtype, $typeid, $sourcecid) = $row;
     if ($itemtype == "InlineText") {
         //$query = "INSERT INTO imas_inlinetext (courseid,title,text,startdate,enddate) ";
         //$query .= "SELECT '$cid',title,text,startdate,enddate FROM imas_inlinetext WHERE id='$typeid'";
@@ -235,11 +240,11 @@ function copyitem($itemid, $gbcats = false, $sethidden = false)
         $query = "SELECT name,summary,intro,startdate,enddate,reviewdate,LPcutoff,
 			timelimit,minscore,displaymethod,defpoints,defattempts,deffeedback,
 			defpenalty,itemorder,shuffle,gbcategory,password,cntingb,showcat,showhints,showtips,
-			allowlate,exceptionpenalty,earlybonus,noprint,avail,groupmax,isgroup,groupsetid,endmsg,
+			allowlate,exceptionpenalty,exceptionpenaltyinterval,earlybonus,noprint,avail,groupmax,isgroup,groupsetid,endmsg,
 			deffeedbacktext,eqnhelper,caltag,calrtag,tutoredit,posttoforum,msgtoinstr,
-			istutorial,viddata,reqscore,reqscoreaid,reqscoretype,ancestors,defoutcome,
+			istutorial,viddata,reqscorejson,reqscoretype,ancestors,defoutcome,
 			posttoforum,ptsposs,extrefs,submitby,showscores,showans,viewingb,scoresingb,
-			ansingb,defregens,defregenpenalty,ver,keepscore,overtime_grace,overtime_penalty,
+			ansingb,defregens,defregenpenalty,ver,keepscore,retakewait,overtime_grace,overtime_penalty,
 			showwork,autoexcuse,workcutoff
 			FROM imas_assessments WHERE id=:id";
         $stm = $DBH->prepare($query);
@@ -294,9 +299,9 @@ function copyitem($itemid, $gbcats = false, $sethidden = false)
             }
         }
 
-        $reqscoreaid = $row['reqscoreaid'];
+        $reqscorejson = $row['reqscorejson'];
         if ($cid != $sourcecid) { // if same course, can keep this
-            unset($row['reqscoreaid']);
+            unset($row['reqscorejson']); // causes us to not copy immediately
         }
         $autoexcuse = $row['autoexcuse'];
         if ($cid != $sourcecid) { // if same course, can keep this
@@ -332,8 +337,8 @@ function copyitem($itemid, $gbcats = false, $sethidden = false)
         }
         $stm->execute($queryarr);
         $newtypeid = $DBH->lastInsertId();
-        if ($reqscoreaid > 0) {
-            $reqscoretrack[$newtypeid] = $reqscoreaid;
+        if ($reqscorejson != '') {
+            $reqscoretrack[$newtypeid] = $reqscorejson;
         }
         if ($sourcecid != $cid && $forumtopostto > 0) {
             $posttoforumtrack[$newtypeid] = $forumtopostto;
@@ -476,7 +481,7 @@ function copyitem($itemid, $gbcats = false, $sethidden = false)
 
 function copysub($items, $parent, &$addtoarr, $gbcats = false, $sethidden = false)
 {
-    global $checked, $blockcnt, $cid, $sourcecid;
+    global $checked, $blockcnt, $cid, $sourcecid, $blockidmap;
     if (intval($cid) == intval($sourcecid)) {
         $samecourse = true;
     } else {
@@ -492,6 +497,7 @@ function copysub($items, $parent, &$addtoarr, $gbcats = false, $sethidden = fals
                 $newblock['name'] = $item['name'] . $_POST['append'];
                 $newblock['id'] = $blockcnt;
                 $blockcnt++;
+                $blockidmap[$item['id']] = $newblock['id'];
                 $newblock['startdate'] = $item['startdate'];
                 $newblock['enddate'] = $item['enddate'];
                 $newblock['avail'] = $sethidden ? 0 : $item['avail'];
@@ -533,17 +539,12 @@ function doaftercopy($sourcecid, &$newitems)
     } else {
         $samecourse = false;
     }
-    //update reqscoreaids if possible.
+    //update reqscorejson if possible.
     if (count($reqscoretrack) > 0) {
-        $stmA = $DBH->prepare("UPDATE imas_assessments SET reqscoreaid=:reqscoreaid WHERE id=:id");
-        $stmB = $DBH->prepare("UPDATE imas_assessments SET reqscore=0 WHERE id=:id");
-        foreach ($reqscoretrack as $newid => $oldreqaid) {
-            //is old reqscoreaid in copied list?
-            if (isset($assessnewid[$oldreqaid])) {
-                $stmA->execute(array(':reqscoreaid' => $assessnewid[$oldreqaid], ':id' => $newid));
-            } else if (!$samecourse) {
-                $stmB->execute(array(':id' => $newid));
-            }
+        $stmA = $DBH->prepare("UPDATE imas_assessments SET reqscorejson=:reqscorejson WHERE id=:id");
+        foreach ($reqscoretrack as $newid => $oldreqjson) {
+            $newjson = remapReqScore(json_decode($oldreqjson,true), $assessnewid, $samecourse);
+            $stmA->execute(array(':reqscorejson' => empty($newjson)?'':json_encode($newjson), ':id' => $newid));
         }
     }
     //update any assessment ids in categories
@@ -610,6 +611,140 @@ function doaftercopy($sourcecid, &$newitems)
         handleextoolcopy($sourcecid);
         removeGrouplimits($newitems);
     }
+    applyCourseLinkRemap($sourcecid);
+}
+
+// Scans and remaps/strips <a class="courselink"> anchors in the text fields
+// of every item just copied, using $itemtypemap/$blockidmap built up during
+// this copy operation. Must be called after all copyitem() calls for this
+// operation have completed, since it's a fixed point over the tracking maps
+// -- see includes/courselinkinc.php for the remap rules.
+function applyCourseLinkRemap($sourcecid)
+{
+    global $DBH, $cid, $itemtypemap, $blockidmap;
+    if (count($itemtypemap) == 0) {
+        return;
+    }
+    if (intval($cid) === intval($sourcecid)) {
+        // same-course copy -- leave courselinks pointing at their original
+        // targets rather than cross-linking to sibling copies made in this
+        // same operation.  May want to change this...
+        return;
+    }
+    // plain HTML/text columns, scanned and replaced as flat strings.
+    // Assessment.endmsg and .intro are handled separately below -- endmsg is
+    // a serialized PHP array of messages, and intro is sometimes a
+    // JSON-encoded array of per-question intro sections -- neither is a
+    // plain string, so neither can be blind-replaced.
+    $fieldsByType = array(
+        'InlineText' => array('text'),
+        'LinkedText' => array('text', 'summary'),
+        'Forum' => array('description', 'postinstr', 'replyinstr'),
+        'Wiki' => array('description'),
+        'Drill' => array('summary', 'itemdescr'),
+        'Assessment' => array('summary', 'deffeedbacktext'),
+    );
+    $tableByType = array(
+        'InlineText' => 'imas_inlinetext',
+        'LinkedText' => 'imas_linkedtext',
+        'Forum' => 'imas_forums',
+        'Wiki' => 'imas_wikis',
+        'Drill' => 'imas_drillassess',
+        'Assessment' => 'imas_assessments',
+    );
+    foreach ($itemtypemap as $key => $newid) {
+        if (!$newid) {
+            continue;
+        }
+        $itemtype = null;
+        foreach ($fieldsByType as $t => $fields) {
+            if (strncmp($key, $t, strlen($t)) === 0) {
+                $itemtype = $t;
+                break;
+            }
+        }
+        if ($itemtype === null) {
+            continue; // Calendar, or a hook-added type with no scannable text field
+        }
+        $fields = $fieldsByType[$itemtype];
+        $table = $tableByType[$itemtype];
+        $stm = $DBH->prepare("SELECT " . implode(',', $fields) . " FROM $table WHERE id=:id");
+        $stm->execute(array(':id' => $newid));
+        $row = $stm->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            continue;
+        }
+        $updates = array();
+        foreach ($fields as $f) {
+            if (!empty($row[$f]) && strpos($row[$f], 'courselink') !== false) {
+                $new = remapCourseLinks($row[$f], $sourcecid, $cid, $itemtypemap, $blockidmap);
+                if ($new !== $row[$f]) {
+                    $updates[$f] = $new;
+                }
+            }
+        }
+        if ($itemtype === 'Assessment') {
+            $stm3 = $DBH->prepare("SELECT intro FROM imas_assessments WHERE id=:id");
+            $stm3->execute(array(':id' => $newid));
+            $rawintro = $stm3->fetchColumn();
+            if (!empty($rawintro) && strpos($rawintro, 'courselink') !== false) {
+                $newintro = transformAssessmentIntro($rawintro, function ($html) use ($sourcecid, $cid, &$itemtypemap, &$blockidmap) {
+                    return remapCourseLinks($html, $sourcecid, $cid, $itemtypemap, $blockidmap);
+                });
+                if ($newintro !== $rawintro) {
+                    $updates['intro'] = $newintro;
+                }
+            }
+
+            $stm3 = $DBH->prepare("SELECT endmsg FROM imas_assessments WHERE id=:id");
+            $stm3->execute(array(':id' => $newid));
+            $rawendmsg = $stm3->fetchColumn();
+            if (!empty($rawendmsg) && strpos($rawendmsg, 'courselink') !== false) {
+                $endmsg = unserialize($rawendmsg);
+                if (is_array($endmsg)) {
+                    $changed = false;
+                    if (!empty($endmsg['def']) && strpos($endmsg['def'], 'courselink') !== false) {
+                        $new = remapCourseLinks($endmsg['def'], $sourcecid, $cid, $itemtypemap, $blockidmap);
+                        if ($new !== $endmsg['def']) {
+                            $endmsg['def'] = $new;
+                            $changed = true;
+                        }
+                    }
+                    if (!empty($endmsg['commonmsg']) && strpos($endmsg['commonmsg'], 'courselink') !== false) {
+                        $new = remapCourseLinks($endmsg['commonmsg'], $sourcecid, $cid, $itemtypemap, $blockidmap);
+                        if ($new !== $endmsg['commonmsg']) {
+                            $endmsg['commonmsg'] = $new;
+                            $changed = true;
+                        }
+                    }
+                    if (!empty($endmsg['msgs']) && is_array($endmsg['msgs'])) {
+                        foreach ($endmsg['msgs'] as $sc => $msg) {
+                            if (!empty($msg) && strpos($msg, 'courselink') !== false) {
+                                $new = remapCourseLinks($msg, $sourcecid, $cid, $itemtypemap, $blockidmap);
+                                if ($new !== $msg) {
+                                    $endmsg['msgs'][$sc] = $new;
+                                    $changed = true;
+                                }
+                            }
+                        }
+                    }
+                    if ($changed) {
+                        $updates['endmsg'] = serialize($endmsg);
+                    }
+                }
+            }
+        }
+        if (count($updates) > 0) {
+            $setsql = array();
+            $params = array(':id' => $newid);
+            foreach ($updates as $f => $v) {
+                $setsql[] = "$f=:$f";
+                $params[":$f"] = $v;
+            }
+            $stm2 = $DBH->prepare("UPDATE $table SET " . implode(',', $setsql) . " WHERE id=:id");
+            $stm2->execute($params);
+        }
+    }
 }
 
 function removeGrouplimits(&$items)
@@ -624,8 +759,8 @@ function removeGrouplimits(&$items)
 
 function copyallsub($items, $parent, &$addtoarr, $gbcats = false, $sethidden = false)
 {
-    global $blockcnt, $reqscoretrack, $assessnewid;
-    
+    global $blockcnt, $reqscoretrack, $assessnewid, $blockidmap;
+
     if (!empty($_POST['append']) && $_POST['append'][0] != ' ') {
         $_POST['append'] = ' ' . $_POST['append'];
     }
@@ -638,6 +773,7 @@ function copyallsub($items, $parent, &$addtoarr, $gbcats = false, $sethidden = f
             $newblock['name'] = $item['name'] . $_POST['append'];
             $newblock['id'] = $blockcnt;
             $blockcnt++;
+            $blockidmap[$item['id']] = $newblock['id'];
             $newblock['startdate'] = $item['startdate'];
             $newblock['enddate'] = $item['enddate'];
             $newblock['avail'] = $sethidden ? 0 : $item['avail'];
@@ -668,11 +804,12 @@ function getiteminfo($itemid)
     global $DBH;
     $stm = $DBH->prepare("SELECT itemtype,typeid FROM imas_items WHERE id=:id");
     $stm->execute(array(':id' => $itemid));
-    if ($stm->rowCount() == 0) {
+    $row = $stm->fetch(PDO::FETCH_NUM);
+    if ($row === false) {
         echo "Uh oh, item #" . Sanitize::onlyInt($itemid) . " doesn't appear to exist";
         return array(false, false, false, false);
     }
-    list($itemtype, $typeid) = $stm->fetch(PDO::FETCH_NUM);
+    list($itemtype, $typeid) = $row;
     if ($itemtype === 'Calendar') {
         return array($itemtype, 'Calendar', '');
     }
@@ -832,8 +969,9 @@ function copyrubrics($offlinerubrics = array())
         //$rubrow = addslashes_deep($stm->fetch(PDO::FETCH_NUM));
         //$srcrub = $stm2->fetch(PDO::FETCH_ASSOC);
         $rub_search_stm->execute(array(':rubric' => $srcrub['rubric'], ':ownerid' => $userid, ':groupid' => $groupid));
-        if ($rub_search_stm->rowCount() > 0) {
-            $newid = $rub_search_stm->fetchColumn(0);
+        $rub_search_row = $rub_search_stm->fetch(PDO::FETCH_NUM);
+        if ($rub_search_row !== false) {
+            $newid = $rub_search_row[0];
             //echo "found existing of mine, $newid<br/>";
         } else {
             $rub_ins_stm->execute(array(':ownerid' => $userid, ':name' => $srcrub['name'], ':rubrictype' => $srcrub['rubrictype'], ':rubric' => $srcrub['rubric']));
@@ -882,7 +1020,7 @@ function handleextoolcopy($sourcecid)
     $toolmap = array();
     $stm = $DBH->prepare("SELECT id FROM imas_teachers WHERE courseid=:courseid AND userid=:userid");
     $stm->execute(array(':courseid' => $sourcecid, ':userid' => $userid));
-    if ($stm->rowCount() > 0) {
+    if ($stm->fetch(PDO::FETCH_NUM) !== false) {
         $oktocopycoursetools = true;
     }
     $toolidlist = implode(',', array_map('intval', $exttooltrack));
@@ -900,8 +1038,9 @@ function handleextoolcopy($sourcecid)
         if (!isset($toolmap[$row['id']])) {
             //try url matching of existing tools in the destination course
             $ext_search_stm->execute(array(':courseid' => $cid, ':url' => $row['url']));
-            if ($ext_search_stm->rowCount() > 0) {
-                $toolmap[$row['id']] = $ext_search_stm->fetchColumn(0);
+            $ext_search_row = $ext_search_stm->fetch(PDO::FETCH_NUM);
+            if ($ext_search_row !== false) {
+                $toolmap[$row['id']] = $ext_search_row[0];
             }
         }
         if (isset($toolmap[$row['id']])) {

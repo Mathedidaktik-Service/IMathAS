@@ -3,6 +3,7 @@
 //(c) 2006 David Lippman
 
 /*** master php includes *******/
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once '../assess2/AssessStandalone.php';
 
@@ -34,9 +35,10 @@ if ($myrights<20) {
 	if (isset($_GET['a11ymode'])) {
 		$a11ymode = intval($_GET['a11ymode']);
 		if ($a11ymode > 0) {
-			$origa11ysettings = [$_SESSION['userprefs']['graphdisp'], $_SESSION['userprefs']['drawentry']];
+			$origa11ysettings = [$_SESSION['userprefs']['graphdisp'], $_SESSION['userprefs']['drawentry'], $_SESSION['userprefs']['useeqed']];
 			if (($a11ymode&1) == 1) {
 				$_SESSION['userprefs']['graphdisp'] = 0;
+				$_SESSION['userprefs']['useeqed'] = 0;
 				$_SESSION['graphdisp'] = 0;
 			}
 			if (($a11ymode&2) == 2) {
@@ -45,6 +47,9 @@ if ($myrights<20) {
 		}
 	}
   if (isset($_POST['a11yreview'])) {
+	if (empty($_GET['qsetid'])) {
+		exit;
+	}
     if ($_POST['a11yreview'] === 'remove') {
       $query = 'DELETE FROM imas_a11yreviews WHERE qsetid=? AND userid=?';
       $stm = $DBH->prepare($query);
@@ -100,6 +105,10 @@ if ($myrights<20) {
 		$onlychk = 0;
 	}
   	$qsetid = Sanitize::onlyInt($_GET['qsetid']);
+	if (empty($qsetid)) {
+		echo 'Missing qsetid';
+		exit;
+	}
 	if (isset($_GET['formn']) && isset($_GET['loc'])) {
 		$formn = Sanitize::encodeStringForJavascript($_GET['formn']);
 		$loc = Sanitize::encodeStringForJavascript($_GET['loc']);
@@ -233,7 +242,42 @@ if ($myrights<20) {
 	} else {
 		$eqnhelper = 4;
 	}
-	$resultLibNames = $DBH->prepare("SELECT imas_libraries.name,imas_users.LastName,imas_users.FirstName,imas_libraries.id AS libid,imas_users.id AS uid,imas_libraries.userights,imas_users.groupid FROM imas_libraries,imas_library_items,imas_users  WHERE imas_libraries.id=imas_library_items.libid AND imas_libraries.deleted=0 AND imas_library_items.deleted=0 AND imas_library_items.ownerid=imas_users.id AND imas_library_items.qsetid=:qsetid");
+	if (($CFG['MySQL_ver'] ?? 0) >= 8) {
+		$query = 'WITH RECURSIVE ancestors AS (
+		SELECT l.id, l.name, l.parent, 0 AS depth, l.id AS root_libid
+		FROM imas_libraries l
+		INNER JOIN imas_library_items li ON l.id = li.libid
+		WHERE li.qsetid = :qsetid
+			AND l.deleted = 0
+			AND li.deleted = 0
+
+		UNION ALL
+
+		SELECT l.id, l.name, l.parent, a.depth + 1, a.root_libid
+		FROM imas_libraries l
+		INNER JOIN ancestors a ON l.id = a.parent
+		WHERE a.parent != 0
+		),
+		breadcrumbs AS (
+		SELECT root_libid AS libid,
+				GROUP_CONCAT(name ORDER BY depth DESC SEPARATOR " > ") AS breadcrumb
+		FROM ancestors
+		GROUP BY root_libid
+		)
+		SELECT l.name, u.LastName, u.FirstName, l.id AS libid, u.id AS uid,
+			l.userights, u.groupid,
+			b.breadcrumb
+		FROM imas_libraries l
+		JOIN imas_library_items li ON l.id = li.libid
+		JOIN imas_users u ON li.ownerid = u.id
+		JOIN breadcrumbs b ON l.id = b.libid
+		WHERE l.deleted = 0
+		AND li.deleted = 0
+		AND li.qsetid = :qsetid;';
+		$resultLibNames = $DBH->prepare($query);
+	} else {
+		$resultLibNames = $DBH->prepare("SELECT imas_libraries.name,imas_users.LastName,imas_users.FirstName,imas_libraries.id AS libid,imas_users.id AS uid,imas_libraries.userights,imas_users.groupid FROM imas_libraries,imas_library_items,imas_users  WHERE imas_libraries.id=imas_library_items.libid AND imas_libraries.deleted=0 AND imas_library_items.deleted=0 AND imas_library_items.ownerid=imas_users.id AND imas_library_items.qsetid=:qsetid");
+	}
 	$resultLibNames->execute(array(':qsetid'=>$qsetid));
 }
 
@@ -246,7 +290,7 @@ $useeqnhelper = $eqnhelper ?? 0;
 $placeinhead = '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/assess2/vue/css/style.css?v='.$lastvueupdate.'" />';
 $placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/assess2/print.css?v='.$lastvueupdate.'" media="print">';
 if (!empty($CFG['assess2-use-vue-dev'])) {
-  $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=101825" type="text/javascript"></script>';
+  $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=070726" type="text/javascript"></script>';
   $placeinhead .= '<script src="'.$staticroot.'/javascript/drawing.js?v=041920" type="text/javascript"></script>';
   $placeinhead .= '<script src="'.$staticroot.'/javascript/AMhelpers2.js?v=071122" type="text/javascript"></script>';
   $placeinhead .= '<script src="'.$staticroot.'/javascript/eqntips.js?v=041920" type="text/javascript"></script>';
@@ -254,12 +298,12 @@ if (!empty($CFG['assess2-use-vue-dev'])) {
   $placeinhead .= '<script src="'.$staticroot.'/mathquill/mqeditor.js?v=021121" type="text/javascript"></script>';
   $placeinhead .= '<script src="'.$staticroot.'/mathquill/mqedlayout.js?v=071122" type="text/javascript"></script>';
 } else {
-  $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=020326" type="text/javascript"></script>';
+  $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=070726" type="text/javascript"></script>';
   $placeinhead .= '<script src="'.$staticroot.'/javascript/assess2_min.js?v='.$lastvueupdate.'" type="text/javascript"></script>';
 }
 
 $placeinhead .= '<script src="'.$staticroot.'/javascript/assess2supp.js?v=041522" type="text/javascript"></script>';
-$placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mathquill-basic.css?v=010726">
+$placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mathquill-basic.css?v=070726">
   <link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mqeditor.css?v=020226">';
 $placeinhead .= '<style>form > hr { border: 0; border-bottom: 1px solid #ddd;}</style>';
 $placeinhead .= '<script>
@@ -637,7 +681,7 @@ if ($overwriteBody==1) {
             } else {
                 echo '<span>';
             }
-            echo Sanitize::encodeStringForDisplay($row['name']) . '</span>';
+            echo Sanitize::encodeStringForDisplay($row['breadcrumb'] ?? $row['name']) . '</span>';
 
 			if ($isadmin) {
                 printf(' (<span class="pii-full-name">%s, %s</span>)',
@@ -688,6 +732,7 @@ if ($a11ymode > 0) {
 	$_SESSION['userprefs']['graphdisp'] = $origa11ysettings[0];
 	$_SESSION['graphdisp'] = $origa11ysettings[0];
 	$_SESSION['userprefs']['drawentry'] = $origa11ysettings[1];
+	$_SESSION['userprefs']['useeqed'] = $origa11ysettings[2];
 }
 
 require_once "../footer.php";

@@ -2,6 +2,7 @@
 
 require_once __DIR__.'/migratesettings.php';
 require_once __DIR__."/TeacherAuditLog.php";
+require_once __DIR__."/validatesections.php";
 
 //util function for unenrolling students
 //$cid = courseid
@@ -101,7 +102,7 @@ function unenrollstu($cid,$tounenroll,$delforum=false,$deloffline=false,$withwit
 			while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 				$sp = explode(';', $row['bestscores']);
 				$as = str_replace(array('-1','-2','~'), array('0','0',','), $sp[0]);
-				$total = array_sum(explode(',', $as));
+				$total = array_sum(array_map('floatval', explode(',', $as)));
 				$grades[$row['userid']]['assessment'][$row["assessmentid"]] = $total;
 			}
 			$query = "SELECT userid, assessmentid, score FROM imas_assessment_records "
@@ -289,6 +290,9 @@ function unenrollstu($cid,$tounenroll,$delforum=false,$deloffline=false,$withwit
 			)
 		);
 	}
+
+	// fix any section-limited blocks to account for lost sections
+	validateSections($cid);
 
 	/*
 	$lognote = "Unenroll in $cid run by $userid via script ".basename($_SERVER['PHP_SELF']);

@@ -234,10 +234,11 @@ $placeinhead .= '<script type="text/javascript">$(function() {
 require_once "../header.php";
 $stm = $DBH->prepare("SELECT value FROM imas_bookmarks WHERE userid=:userid AND courseid=:courseid AND name=:name");
 $stm->execute(array(':userid'=>$userid, ':courseid'=>$cid, ':name'=>'TR'.$_GET['folder']));
-if ($stm->rowCount()==0) {
+$row = $stm->fetch(PDO::FETCH_NUM);
+if ($row === false) {
 	$openitem = '';
 } else {
-	$openitem = $stm->fetchColumn(0);
+	$openitem = $row[0];
 }
 
 $foundfirstitem = '';
@@ -345,7 +346,7 @@ function printlist($items) {
 			if ($line['itemtype']=='Assessment') {
 				//TODO check availability, timelimit, etc.
 				//TODO: reqscoreaid, latepasses
-				 $stm = $DBH->prepare("SELECT name,summary,startdate,enddate,reviewdate,LPcutoff,deffeedback,reqscore,reqscoreaid,reqscoretype,avail,allowlate,timelimit,displaymethod,ver FROM imas_assessments WHERE id=:id AND courseid=:cid");
+				 $stm = $DBH->prepare("SELECT name,summary,startdate,enddate,reviewdate,LPcutoff,deffeedback,reqscore,reqscorejson,reqscoretype,avail,allowlate,timelimit,displaymethod,ver FROM imas_assessments WHERE id=:id AND courseid=:cid");
 				 $stm->execute(array(':id'=>$typeid, ':cid'=>$cid));
 				 $line = $stm->fetch(PDO::FETCH_ASSOC);
 				 if (isset($exceptions[$item])) {

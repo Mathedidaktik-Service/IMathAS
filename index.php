@@ -527,8 +527,12 @@ function printCourses($data,$title,$type=null,$hashiddencourses=false) {
     }
     //echo '</div><div class="center">';
     echo '<span id="unhidelink'.$type.'" '.($hashiddencourses?'':'style="display:none"').'><br><a class="small" href="admin/unhidefromcourselist.php?type='.$type.'">',_('View hidden courses'),'</a></span> ';
-    if ($type=='teach' && count($data)>0) {
-        echo '<br/><a class="small" href="admin/forms.php?action=findstudent&from=home">',_('Find Student'),'</a> ';
+    if ($type=='teach') {
+		echo '<br>';
+		if (count($data)>0) {
+        	echo '<a class="small" href="admin/forms.php?action=findstudent&from=home">',_('Find Student'),'</a> | ';
+		}
+		echo '<a class="small" href="admin/userlti.php">',_('LTI Connections'),'</a>';
     }
     echo '</div>';
     if ($type=='teach' && ($myrights>=75 || ($myspecialrights&4)==4)) {
@@ -703,7 +707,7 @@ function printPostsGadget() {
 		} else if ($n>1) {
 			$subject = "Re<sup>$n</sup>: ".Sanitize::encodeStringForDisplay($subject);
 		}
-		echo "<td><a href=\"forums/posts.php?page=-3&cid={$line['courseid']}&forum={$line['id']}&thread={$line['threadid']}\">";
+		echo "<td><a href=\"forums/posts.php?type=coursenew&cid={$line['courseid']}&forum={$line['id']}&thread={$line['threadid']}\">";
 		echo $subject;
 		echo '</a></td>';
 		if ($threaddata[$line['threadid']]['isanon']==1) {

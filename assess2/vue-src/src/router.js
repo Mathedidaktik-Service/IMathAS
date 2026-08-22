@@ -11,6 +11,7 @@ import Print from './views/Print.vue';
 import FullPaged from './views/FullPaged.vue';
 const Videocued = () => import('./views/Videocued.vue');
 const Livepoll = () => import('./views/Livepoll.vue');
+const Drill = () => import('./views/Drill.vue');
 
 const router = createRouter({
   history: createWebHashHistory(
@@ -53,6 +54,19 @@ const router = createRouter({
       path: '/skip/:qn',
       name: 'skip',
       component: Skip,
+      beforeEnter: (to, from, next) => {
+        // if no active attempt, route to launch
+        if (store.inProgress) {
+          next();
+        } else {
+          next({ path: '/', replace: true });
+        }
+      }
+    },
+    {
+      path: '/drill/:qn?',
+      name: 'drill',
+      component: Drill,
       beforeEnter: (to, from, next) => {
         // if no active attempt, route to launch
         if (store.inProgress) {

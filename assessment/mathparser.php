@@ -116,6 +116,7 @@ class MathParser
   private $origstr = '';
   private $docomplex = false;
   private $allowEscinot = true;
+  private $prettyImplicitMult = false;
 
   /**
    * Construct the parser
@@ -379,6 +380,7 @@ class MathParser
       ob_end_clean(); // ditch buffer contents 
       return $out;
     } catch (Throwable $t) {
+      ob_end_clean(); // ditch buffer contents 
       return sqrt(-1);
     } 
   }
@@ -821,9 +823,11 @@ class MathParser
     }
 
     //see if was function application
+    $wasFunction = false;
     if (count($this->operatorStack) > 0) {
       $previous = end($this->operatorStack);
       if ($previous['type'] === 'function') {
+        $wasFunction = true;
         $node = array_pop($this->operatorStack); //this is the function node
         $operand = array_pop($this->operandStack);
         if ($node['symbol'] === 'log_') {
@@ -859,6 +863,7 @@ class MathParser
           if ($power === '-1' && function_exists('a'.$subSymbol)) {
             //treat sin^-1 as asin
             $node['symbol'] = 'arc'.$subSymbol;
+            $node['info'] = 'waspower'; // remember original sin^-1 notation for pretty-printing
           } else {
             //rewrite as power node
             $node['symbol'] = $subSymbol;
@@ -869,11 +874,23 @@ class MathParser
               'right'=> [
                 'type'=>'number',
                 'symbol'=>$power
-              ]
+              ],
+              'info'=>'wasshorthand'
             ];
           }
         }
         $this->operandStack[] = $node;
+      }
+    }
+
+    if (!$wasFunction) {
+      // a plain grouping paren (not a function call): tag the resulting
+      // expression as explicitly parenthesized in the original input, so
+      // pretty-printing can choose to preserve that grouping visually
+      // (e.g. (5*pi)/3 keeping its numerator grouped as (5pi)/3)
+      $top = count($this->operandStack) - 1;
+      if ($top >= 0 && $this->operandStack[$top]['type'] === 'operator') {
+        $this->operandStack[$top]['info'] = 'wasparens';
       }
     }
   }
@@ -1069,6 +1086,1494 @@ class MathParser
         $node['symbol'] .
         $this->toOutputString($node['right']).')';
     }
+  }
+
+  /**
+   * Produces a mathematically-correct, cleaned-up ("pretty") string
+   * representation of an AST node.  Unlike toOutputString, this:
+   *  - drops parentheses that aren't needed to preserve meaning (parens
+   *    around function inputs are always kept)
+   *  - drops 1* terms (1*x -> x)
+   *  - drops 0* terms (x^2+0x -> x^2)
+   *  - drops ^0 (3^0 -> 1, 5x^0 -> 5)
+   *  - drops ^1 (3x^1 -> 3x)
+   *  - cleans up +/- signs (3+(-4) -> 3-4, 5-(-x) -> 5+x)
+   * Does not modify the underlying AST.
+   * @param  array|null $node  AST node (defaults to the full parsed tree)
+   * @param  boolean $implicitMult  If true, drop the '*' between a
+   *                                multiplication's factors when it can be
+   *                                done unambiguously (4*x -> 4x,
+   *                                x*(x+1) -> x(x+1)), keeping a space
+   *                                between two "word-like" factors
+   *                                (x*y -> x y, x*sin(x) -> x sin(x)) and
+   *                                never merging two numbers (2*3^x stays
+   *                                2*3^x).
+   * @param  int  $simplifyLevel  Level of simplification:
+   *                              0 = none (default);
+   *                              1 = combine terms in a sum that share the
+   *                                  same variable part and have plain
+   *                                  integer/decimal coefficients, and add
+   *                                  up plain number terms
+   *                                  ((x+1)+x -> 2x+1, 2x+3y+4x -> 6x+3y,
+   *                                  3x+4+7 -> 3x+11).  Fractions and other
+   *                                  non-literal-number terms are left
+   *                                  alone (x+3+5/2 stays x+3+5/2).
+   *                              2 = also evaluates numeric powers and adds
+   *                                  fractional coefficients exactly
+   *                                  (1/2x+1/4x+1+1/2^2 -> 3/4x+5/4).
+   *                              3 = also combines factors within a
+   *                                  multiplication/division chain that
+   *                                  share the same base by adding their
+   *                                  exponents, multiplies/reduces plain
+   *                                  number factors, and moves any
+   *                                  resulting negative-exponent factors
+   *                                  into a denominator.  No distribution
+   *                                  over sums (x*(x+3) is unchanged), but
+   *                                  2x*x+3 -> 2x^2+3, 5x^2*2x^5 -> 10x^7,
+   *                                  x/x^2 -> 1/x, 2*1/2 -> 1, 6/3 -> 2,
+   *                                  6/8 -> 3/4.
+   * @return string
+   */
+  public function toPrettyString($node = null, $implicitMult = false, $simplifyLevel = 0) {
+    if ($node === null) {
+      $node = $this->AST;
+    }
+    if (empty($node)) {
+      return '';
+    }
+    $this->prettyImplicitMult = $implicitMult;
+    $simplified = $this->prettySimplifyNode($node);
+    if ($simplifyLevel > 0) {
+      $simplified = $this->prettyCombineNode($simplified, $simplifyLevel);
+    }
+    return $this->prettyRenderNode($simplified);
+  }
+
+  /**
+   * Recursively builds a simplified copy of the given node for
+   * pretty-printing: removes 1* and 0* terms and ^0 / ^1, and normalizes
+   * negation so it is always represented via a '~' node (never a
+   * negative number literal), which keeps sign handling in the renderer
+   * simple and avoids e.g. turning (-2)^x into the wrong "-2^x".
+   * @param  array $node  AST node
+   * @return array  simplified copy of the node
+   */
+  private function prettySimplifyNode($node) {
+    if ($node['type'] === 'number') {
+      $val = (float) $node['symbol'];
+      if ($val < 0) {
+        return ['type'=>'operator', 'symbol'=>'~', 'left'=>['type'=>'number', 'symbol'=>-$val]];
+      }
+      return ['type'=>'number', 'symbol'=>$val];
+    }
+    if ($node['type'] === 'variable') {
+      return $node;
+    }
+    if ($node['type'] === 'function') {
+      $node['input'] = $this->prettySimplifyNode($node['input']);
+      if (!empty($node['index']) && is_array($node['index'])) {
+        $node['index'] = $this->prettySimplifyNode($node['index']);
+      }
+      return $node;
+    }
+
+    $symbol = $node['symbol'];
+
+    if ($symbol === '~') {
+      $left = $this->prettySimplifyNode($node['left']);
+      if ($left['symbol'] === '~') {
+        // double negative cancels
+        return $left['left'];
+      }
+      return ['type'=>'operator', 'symbol'=>'~', 'left'=>$left];
+    }
+
+    if ($symbol === '+' || $symbol === '-') {
+      $left = $this->prettySimplifyNode($node['left']);
+      $right = $this->prettySimplifyNode($node['right']);
+      $leftIsZero = ($left['type'] === 'number' && (float) $left['symbol'] === 0.0);
+      $rightIsZero = ($right['type'] === 'number' && (float) $right['symbol'] === 0.0);
+      if ($leftIsZero && $rightIsZero) {
+        return ['type'=>'number', 'symbol'=>0.0];
+      }
+      if ($rightIsZero) {
+        return $left;
+      }
+      if ($leftIsZero) {
+        return ($symbol === '-') ? $this->prettyNegateNode($right) : $right;
+      }
+      // update in place (rather than building a fresh array) so any extra
+      // keys on the node, like an 'info' tag marking an explicitly
+      // parenthesized sum, survive simplification
+      $node['left'] = $left;
+      $node['right'] = $right;
+      return $node;
+    }
+
+    if ($symbol === '*' || $symbol === '/') {
+      $left = $this->prettySimplifyNode($node['left']);
+      $right = $this->prettySimplifyNode($node['right']);
+      $neg = false;
+      if ($left['symbol'] === '~') {
+        $neg = !$neg;
+        $left = $left['left'];
+      }
+      if ($right['symbol'] === '~') {
+        $neg = !$neg;
+        $right = $right['left'];
+      }
+      $leftIsZero = ($left['type'] === 'number' && (float) $left['symbol'] === 0.0);
+      $rightIsZero = ($right['type'] === 'number' && (float) $right['symbol'] === 0.0);
+      $leftIsOne = ($left['type'] === 'number' && (float) $left['symbol'] === 1.0);
+      $rightIsOne = ($right['type'] === 'number' && (float) $right['symbol'] === 1.0);
+
+      if ($symbol === '*' && ($leftIsZero || $rightIsZero)) {
+        return ['type'=>'number', 'symbol'=>0.0];
+      }
+      if ($symbol === '/' && $leftIsZero) {
+        return ['type'=>'number', 'symbol'=>0.0];
+      }
+
+      if ($symbol === '*' && $leftIsOne) {
+        $result = $right;
+      } else if ($rightIsOne) {
+        // covers x*1 -> x and x/1 -> x
+        $result = $left;
+      } else {
+        // update in place (rather than building a fresh array) so any
+        // extra keys on the node, like an 'info' tag marking an explicitly
+        // parenthesized numerator, survive simplification
+        $node['left'] = $left;
+        $node['right'] = $right;
+        $result = $node;
+      }
+      return $neg ? $this->prettyNegateNode($result) : $result;
+    }
+
+    if ($symbol === '^') {
+      $left = $this->prettySimplifyNode($node['left']);
+      $right = $this->prettySimplifyNode($node['right']);
+      if ($right['type'] === 'number' && (float) $right['symbol'] === 0.0) {
+        return ['type'=>'number', 'symbol'=>1.0];
+      }
+      if ($right['type'] === 'number' && (float) $right['symbol'] === 1.0) {
+        return $left;
+      }
+      if ($left['type'] === 'number' && (float) $left['symbol'] === 0.0 &&
+        $right['type'] === 'number' && (float) $right['symbol'] > 0.0
+      ) {
+        // 0 to a positive power is 0 (0^0 and negative powers are left alone above/below)
+        return ['type'=>'number', 'symbol'=>0.0];
+      }
+      // update in place (rather than building a fresh array) so any extra
+      // keys on the node, like the 'info' tag marking shorthand notation
+      // (e.g. sin^2(x)), survive simplification
+      $node['left'] = $left;
+      $node['right'] = $right;
+      return $node;
+    }
+
+    // any other operator (not, comparisons, logical): just recurse
+    if (isset($node['left'])) {
+      $node['left'] = $this->prettySimplifyNode($node['left']);
+    }
+    if (isset($node['right'])) {
+      $node['right'] = $this->prettySimplifyNode($node['right']);
+    }
+    return $node;
+  }
+
+  /**
+   * Additive inverse of an already pretty-simplified node, for display
+   * purposes.  Always represents negation via a '~' node so double
+   * negatives can cancel cleanly.
+   * @param  array $node
+   * @return array
+   */
+  private function prettyNegateNode($node) {
+    if ($node['symbol'] === '~') {
+      return $node['left'];
+    }
+    return ['type'=>'operator', 'symbol'=>'~', 'left'=>$node];
+  }
+
+  /**
+   * Recursively builds a copy of the (already pretty-simplified) node with
+   * "like terms" in sums combined.  See toPrettyString for level meanings.
+   * @param  array $node
+   * @param  int $level  1 or 2
+   * @return array
+   */
+  private function prettyCombineNode($node, $level) {
+    if ($node['type'] === 'number' || $node['type'] === 'variable') {
+      return $node;
+    }
+    if ($node['type'] === 'function') {
+      $node['input'] = $this->prettyCombineNode($node['input'], $level);
+      if (!empty($node['index']) && is_array($node['index'])) {
+        $node['index'] = $this->prettyCombineNode($node['index'], $level);
+      }
+      if ($level >= 3) {
+        if ($node['symbol'] === 'log') {
+          // log/ln of 1 is 0, regardless of base
+          $inputVal = $this->prettyNumericValue($node['input']);
+          if ($inputVal !== null && abs($inputVal - 1.0) < 1e-9) {
+            return ['type'=>'number', 'symbol'=>0.0];
+          }
+          // log_b(b^n) -> n, whether b^n is written directly (ln(e^3) -> 3),
+          // the input is just the base itself (ln(e) -> 1), or the input
+          // is a plain number/fraction that happens to be an exact power
+          // of the base (log_3(9) -> 2, log(1000) -> 3, log(1/1000) -> -3)
+          $baseVal = $this->prettyNumericValue($node['index']);
+          if ($baseVal !== null && $baseVal > 0.0 && abs($baseVal - 1.0) > 1e-9) {
+            if ($node['input']['symbol'] === '^') {
+              $expVal = $this->prettyNumericValue($node['input']['right']);
+              if ($expVal !== null && $this->prettyBaseMatches($node['input']['left'], $baseVal)) {
+                return $this->prettySignedNumber($expVal);
+              }
+            } else if ($this->prettyBaseMatches($node['input'], $baseVal)) {
+              return ['type'=>'number', 'symbol'=>1.0];
+            } else {
+              // prettyNumericValue only recognizes bare numbers, but the
+              // input could be a clean, already-reduced fraction like
+              // 1/1000 - prettyAsFraction catches both
+              $inputFrac = $this->prettyAsFraction($node['input'], $level);
+              if ($inputFrac !== null) {
+                $numericInput = $inputFrac['n'] / $inputFrac['d'];
+                $n = round(log($numericInput) / log($baseVal));
+                if (abs(pow($baseVal, $n) - $numericInput) < 1e-9 * max(1.0, abs($numericInput))) {
+                  return $this->prettySignedNumber($n);
+                }
+              }
+            }
+          }
+        } else if ($node['symbol'] === 'sqrt' || $node['symbol'] === 'nthroot') {
+          $rootIndex = ($node['symbol'] === 'sqrt') ? 2.0 : $this->prettyNumericValue($node['index']);
+          if ($rootIndex !== null && $rootIndex >= 2 && floor($rootIndex) == $rootIndex) {
+            $simplified = $this->prettySimplifyRoot($node['input'], (int) $rootIndex, $level);
+            if ($simplified !== null) {
+              return $simplified;
+            }
+          }
+        }
+      }
+      return $node;
+    }
+
+    $symbol = $node['symbol'];
+
+    if ($symbol === '~') {
+      $node['left'] = $this->prettyCombineNode($node['left'], $level);
+      if ($node['left']['symbol'] === '~') {
+        // double negative may have appeared as a result of combining
+        return $node['left']['left'];
+      }
+      if ($level >= 3) {
+        $inner = $node['left'];
+        // a negative denominator (e.g. -1 or -2x) gets extracted by
+        // prettySimplifyNode into a blanket '~' around the whole
+        // fraction (or the whole numerator, if the denominator reduced
+        // to 1) before this ever runs, rather than left as a per-term
+        // sign a combiner could work with. Push that negation back into
+        // the numerator's terms instead of leaving it as a "-(...)"
+        // wrapper: -(3x-4)/(2x) -> (-3x+4)/(2x), -(3x+2) -> -3x-2
+        if ($inner['symbol'] === '/' && ($inner['left']['symbol'] === '+' || $inner['left']['symbol'] === '-')) {
+          $newNumerator = $this->prettyNegateSum($inner['left'], $level);
+          $denominator = $inner['right'];
+          if ($denominator['type'] === 'number' && (float) $denominator['symbol'] == 1.0) {
+            return $newNumerator;
+          }
+          return ['type'=>'operator', 'symbol'=>'/', 'left'=>$newNumerator, 'right'=>$denominator];
+        }
+        if ($inner['symbol'] === '+' || $inner['symbol'] === '-') {
+          return $this->prettyNegateSum($inner, $level);
+        }
+      }
+      return $node;
+    }
+
+    if ($symbol === '^') {
+      $node['left'] = $this->prettyCombineNode($node['left'], $level);
+      $node['right'] = $this->prettyCombineNode($node['right'], $level);
+      if ($level >= 2) {
+        // prettyNumericValue also recognizes a negative base/exponent
+        // (wrapped in '~', e.g. the -3 in (-3)^2), not just a bare
+        // number, so this also evaluates (-3)^2 -> 9, (-3)^3 -> -27
+        $leftVal = $this->prettyNumericValue($node['left']);
+        $rightVal = $this->prettyNumericValue($node['right']);
+        if ($leftVal !== null && $rightVal !== null) {
+          $val = safepow($leftVal, $rightVal);
+          if (is_numeric($val) && !is_nan($val)) {
+            return $this->prettySignedNumber((float) $val);
+          }
+        }
+      }
+      return $node;
+    }
+
+    if ($symbol === '*' || $symbol === '/') {
+      if ($level >= 3) {
+        if ($symbol === '/') {
+          $commonFactored = $this->prettyCombineCommonFactor($node, $level);
+          if ($commonFactored !== null) {
+            return $commonFactored;
+          }
+          $preserved = $this->prettyCombinePreserveDivision($node, $level);
+          if ($preserved !== null) {
+            return $preserved;
+          }
+        }
+        $rawFactors = [];
+        $this->prettyFlattenProduct($node, 1, $rawFactors);
+        $factors = [];
+        foreach ($rawFactors as $f) {
+          $combined = $this->prettyCombineNode($f['node'], $level);
+          // combining a leaf can itself produce new '*'/'/' structure
+          // (e.g. simplifying sqrt(8) -> 2*sqrt(2)); re-flatten it into
+          // the overall factor list rather than leaving it as one opaque
+          // unit, so e.g. that "2" can still cancel against other factors
+          $this->prettyFlattenProductSide($combined, $f['sign'], $factors);
+        }
+        return $this->prettyRebuildProduct($factors, $level);
+      }
+      $node['left'] = $this->prettyCombineNode($node['left'], $level);
+      $node['right'] = $this->prettyCombineNode($node['right'], $level);
+      return $node;
+    }
+
+    if ($symbol === '+' || $symbol === '-') {
+      $terms = [];
+      $this->prettyFlattenSum($node, $terms);
+      foreach ($terms as $i => $term) {
+        $terms[$i] = $this->prettyCombineNode($term, $level);
+      }
+      $result = $this->prettyRebuildSum($terms, $level);
+      // if this sum was explicitly parenthesized in the original input
+      // (e.g. (1/2+1/3)/(1/3-1/4)) and combining collapsed it down to a
+      // single computed fraction rather than a genuine sum, carry the tag
+      // over so that fraction still displays grouped: (5/6)/(1/12), not
+      // the ambiguous-looking 5/6/(1/12)
+      if (isset($node['info']) && $node['info'] === 'wasparens' && $result['type'] === 'operator') {
+        $result['info'] = 'wasparens';
+      }
+      return $result;
+    }
+
+    // any other operator (not, comparisons, logical): just recurse
+    if (isset($node['left'])) {
+      $node['left'] = $this->prettyCombineNode($node['left'], $level);
+    }
+    if (isset($node['right'])) {
+      $node['right'] = $this->prettyCombineNode($node['right'], $level);
+    }
+    return $node;
+  }
+
+  /**
+   * Flattens a maximal chain of +/- nodes into an ordered list of terms
+   * (each term still signed via a leading '~' where needed).  Only
+   * recurses into a compound right-hand side when it's safe to do so
+   * without redistributing a sign (i.e. joined by '+'); the right side of
+   * a '-' is taken as a single (negated) term rather than decomposed.
+   * @param  array $node
+   * @param  array $terms  (by reference) collected terms, in order
+   * @return void
+   */
+  private function prettyFlattenSum($node, &$terms) {
+    if ($node['left']['symbol'] === '+' || $node['left']['symbol'] === '-') {
+      $this->prettyFlattenSum($node['left'], $terms);
+    } else {
+      $terms[] = $node['left'];
+    }
+    if ($node['symbol'] === '+' && ($node['right']['symbol'] === '+' || $node['right']['symbol'] === '-')) {
+      $this->prettyFlattenSum($node['right'], $terms);
+    } else if ($node['symbol'] === '-') {
+      $terms[] = $this->prettyNegateNode($node['right']);
+    } else {
+      $terms[] = $node['right'];
+    }
+  }
+
+  /**
+   * Groups a flat list of sum terms by their "base" (the part of the term
+   * that isn't a plain numeric coefficient), summing coefficients for
+   * terms that share a base, then rebuilds a '+' chain in order of each
+   * base's first appearance.  Terms whose combined coefficient is 0 are
+   * dropped.
+   * @param  array $terms
+   * @param  int $level
+   * @return array
+   */
+  private function prettyRebuildSum($terms, $level) {
+    $groups = [];
+    $indexOf = [];
+    foreach ($terms as $term) {
+      list($coef, $key, $base) = $this->prettyTermParts($term, $level);
+      if (isset($indexOf[$key])) {
+        $g = $indexOf[$key];
+        $groups[$g]['coef'] = $this->prettyFracAdd($groups[$g]['coef'], $coef);
+      } else {
+        $indexOf[$key] = count($groups);
+        $groups[] = ['base'=>$base, 'coef'=>$coef];
+      }
+    }
+    $resultTerms = [];
+    foreach ($groups as $g) {
+      $coef = $this->prettyFracReduce($g['coef']);
+      if ($coef['n'] == 0) {
+        continue;
+      }
+      $resultTerms[] = $this->prettyBuildTerm($coef, $g['base']);
+    }
+    if (empty($resultTerms)) {
+      return ['type'=>'number', 'symbol'=>0.0];
+    }
+    $out = $resultTerms[0];
+    for ($i = 1; $i < count($resultTerms); $i++) {
+      $out = ['type'=>'operator', 'symbol'=>'+', 'left'=>$out, 'right'=>$resultTerms[$i]];
+    }
+    return $out;
+  }
+
+  /**
+   * Splits a sum term into a [coefficient, baseKey, baseNode] triple.
+   * baseNode is null for a pure constant term (grouped under the special
+   * '#CONST#' key).  At level 1, only plain number literals count as
+   * coefficients/constants; at level 2, a/b fractions of plain numbers do
+   * too, enabling exact fraction arithmetic.
+   * @param  array $term
+   * @param  int $level
+   * @return array  [ ['n'=>num,'d'=>den], string key, array|null baseNode ]
+   */
+  private function prettyTermParts($term, $level) {
+    $sign = 1;
+    while ($term['symbol'] === '~') {
+      $sign *= -1;
+      $term = $term['left'];
+    }
+    $asConst = $this->prettyAsFraction($term, $level);
+    if ($asConst !== null) {
+      return [['n'=>$sign * $asConst['n'], 'd'=>$asConst['d']], '#CONST#', null];
+    }
+    if ($term['symbol'] === '*') {
+      $lf = $this->prettyAsFraction($term['left'], $level);
+      if ($lf !== null) {
+        return [['n'=>$sign * $lf['n'], 'd'=>$lf['d']], $this->toString($term['right']), $term['right']];
+      }
+      $rf = $this->prettyAsFraction($term['right'], $level);
+      if ($rf !== null) {
+        return [['n'=>$sign * $rf['n'], 'd'=>$rf['d']], $this->toString($term['left']), $term['left']];
+      }
+    }
+    return [['n'=>$sign, 'd'=>1.0], $this->toString($term), $term];
+  }
+
+  /**
+   * If the node is a plain number literal (always), or (at level 2 only)
+   * a division of two plain number literals, return it as a fraction.
+   * @param  array $node
+   * @param  int $level
+   * @return array|null  ['n'=>num,'d'=>den] or null
+   */
+  private function prettyAsFraction($node, $level) {
+    if ($node['type'] === 'number') {
+      return ['n'=>(float) $node['symbol'], 'd'=>1.0];
+    }
+    if ($level >= 2 && $node['symbol'] === '/' &&
+      $node['left']['type'] === 'number' && $node['right']['type'] === 'number'
+    ) {
+      return ['n'=>(float) $node['left']['symbol'], 'd'=>(float) $node['right']['symbol']];
+    }
+    return null;
+  }
+
+  /**
+   * Rebuilds a term node from a combined coefficient and its base.
+   * @param  array $coef  ['n'=>num,'d'=>den]
+   * @param  array|null $base  null for a pure constant term
+   * @return array
+   */
+  private function prettyBuildTerm($coef, $base) {
+    $sign = ($coef['n'] < 0) ? -1 : 1;
+    $n = abs($coef['n']);
+    $d = $coef['d'];
+    $coefNode = ($d == 1.0)
+      ? ['type'=>'number', 'symbol'=>$n]
+      : ['type'=>'operator', 'symbol'=>'/', 'left'=>['type'=>'number', 'symbol'=>$n], 'right'=>['type'=>'number', 'symbol'=>$d]];
+    if ($base === null) {
+      $result = $coefNode;
+    } else if ($n == 1.0 && $d == 1.0) {
+      $result = $base;
+    } else {
+      $result = ['type'=>'operator', 'symbol'=>'*', 'left'=>$coefNode, 'right'=>$base];
+    }
+    return ($sign < 0) ? $this->prettyNegateNode($result) : $result;
+  }
+
+  /**
+   * Exact fraction addition, a/b + c/d, reduced to lowest terms.
+   * @param  array $a  ['n'=>num,'d'=>den]
+   * @param  array $b  ['n'=>num,'d'=>den]
+   * @return array
+   */
+  private function prettyFracAdd($a, $b) {
+    return $this->prettyFracReduce([
+      'n' => $a['n'] * $b['d'] + $b['n'] * $a['d'],
+      'd' => $a['d'] * $b['d']
+    ]);
+  }
+
+  /**
+   * Reduces a fraction to lowest terms with a positive denominator, when
+   * numerator and denominator are both whole numbers.
+   * @param  array $f  ['n'=>num,'d'=>den]
+   * @return array
+   */
+  private function prettyFracReduce($f) {
+    $n = $f['n'];
+    $d = $f['d'];
+    if ($d < 0) {
+      $n = -$n;
+      $d = -$d;
+    }
+    if ($d != 0 && floor($n) == $n && floor($d) == $d) {
+      $g = $this->prettyGcd((int) abs($n), (int) $d);
+      if ($g > 1) {
+        $n = $n / $g;
+        $d = $d / $g;
+      }
+    }
+    return ['n'=>$n, 'd'=>$d];
+  }
+
+  /**
+   * Greatest common divisor (non-negative integers)
+   * @param  int $a
+   * @param  int $b
+   * @return int
+   */
+  private function prettyGcd($a, $b) {
+    while ($b != 0) {
+      list($a, $b) = [$b, $a % $b];
+    }
+    return $a == 0 ? 1 : $a;
+  }
+
+  /**
+   * Exact fraction multiplication, (a/b) * (c/d), reduced to lowest terms.
+   * @param  array $a  ['n'=>num,'d'=>den]
+   * @param  array $b  ['n'=>num,'d'=>den]
+   * @return array
+   */
+  private function prettyFracMultiply($a, $b) {
+    return $this->prettyFracReduce([
+      'n' => $a['n'] * $b['n'],
+      'd' => $a['d'] * $b['d']
+    ]);
+  }
+
+  /**
+   * If the node is a number literal, possibly negated via a '~' wrapper
+   * (e.g. an exponent like the -2 in x^-2), returns its numeric value.
+   * @param  array $node
+   * @return float|null
+   */
+  private function prettyNumericValue($node) {
+    $sign = 1;
+    while ($node['symbol'] === '~') {
+      $sign *= -1;
+      $node = $node['left'];
+    }
+    if ($node['type'] === 'number') {
+      return $sign * (float) $node['symbol'];
+    }
+    return null;
+  }
+
+  /**
+   * True if $node is a recognizable representation of the numeric value
+   * $baseVal - either a matching number literal, or the variable 'e' or
+   * 'pi' when $baseVal is (numerically) Euler's number or pi.  Used to
+   * confirm that a log's input base (e.g. the 'e' in ln(e^3)) is really
+   * the same base the log itself uses.
+   * @param  array $node
+   * @param  float $baseVal
+   * @return boolean
+   */
+  private function prettyBaseMatches($node, $baseVal) {
+    if ($node['type'] === 'number') {
+      return abs((float) $node['symbol'] - $baseVal) < 1e-9;
+    }
+    if ($node['type'] === 'variable') {
+      if ($node['symbol'] === 'e') {
+        return abs(M_E - $baseVal) < 1e-9;
+      }
+      if ($node['symbol'] === 'pi') {
+        return abs(M_PI - $baseVal) < 1e-9;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Builds a number node for $val, respecting the invariant that numbers
+   * are never negative directly (negation is always a '~' wrapper).
+   * @param  float $val
+   * @return array
+   */
+  private function prettySignedNumber($val) {
+    $node = ['type'=>'number', 'symbol'=>abs($val)];
+    return ($val < 0) ? $this->prettyNegateNode($node) : $node;
+  }
+
+  /**
+   * Flattens a maximal chain of '*'/'/' nodes into an ordered list of
+   * factors, each tagged with a sign of +1 (multiplied / numerator) or -1
+   * (divided / denominator), by walking the chain and flipping the sign
+   * whenever it descends into the right-hand side of a '/'.
+   * @param  array $node
+   * @param  int $sign  ambient sign for this node's factors
+   * @param  array $factors  (by reference) collected ['node'=>,'sign'=>] pairs
+   * @return void
+   */
+  private function prettyFlattenProduct($node, $sign, &$factors) {
+    if ($node['symbol'] === '*') {
+      $this->prettyFlattenProductSide($node['left'], $sign, $factors);
+      $this->prettyFlattenProductSide($node['right'], $sign, $factors);
+    } else if ($node['symbol'] === '/') {
+      $this->prettyFlattenProductSide($node['left'], $sign, $factors);
+      $this->prettyFlattenProductSide($node['right'], -$sign, $factors);
+    }
+  }
+
+  /**
+   * @param  array $node
+   * @param  int $sign
+   * @param  array $factors  (by reference)
+   * @return void
+   */
+  private function prettyFlattenProductSide($node, $sign, &$factors) {
+    if ($node['symbol'] === '*' || $node['symbol'] === '/') {
+      $this->prettyFlattenProduct($node, $sign, $factors);
+    } else {
+      $factors[] = ['node'=>$node, 'sign'=>$sign];
+    }
+  }
+
+  /**
+   * Groups a flat list of signed product factors by base, adding
+   * exponents for factors that share a base (a bare factor counts as
+   * base^1, a '/' denominator factor counts as base^-1, etc.), and
+   * multiplies together all plain-number factors (or clean fractions of
+   * two numbers, via prettyAsFraction) into a single reduced fraction.
+   * Negative leaves (wrapped in '~') flip the running sign regardless of
+   * numerator/denominator role.
+   * @param  array $factors  list of ['node'=>,'sign'=>] pairs
+   * @param  int $level
+   * @return array  ['constFrac'=>['n'=>,'d'=>] (non-negative, reduced),
+   *                 'sign'=>+1|-1, 'groups'=>[['base'=>,'exponent'=>],...]]
+   */
+  private function prettyClassifyFactors($factors, $level) {
+    $constFrac = ['n'=>1.0, 'd'=>1.0];
+    $groups = [];
+    $indexOf = [];
+    foreach ($factors as $f) {
+      $leaf = $f['node'];
+      $sign = $f['sign'];
+      // a recursively-combined leaf (e.g. a sum reduced to a fraction)
+      // may come back wrapped in '~' if it's negative; that flips the
+      // running product's overall sign regardless of numerator/
+      // denominator role, so pull it out before classifying the leaf
+      while ($leaf['symbol'] === '~') {
+        $constFrac['n'] = -$constFrac['n'];
+        $leaf = $leaf['left'];
+      }
+      $asFrac = $this->prettyAsFraction($leaf, $level);
+      if ($asFrac !== null) {
+        $constFrac = ($sign > 0)
+          ? $this->prettyFracMultiply($constFrac, $asFrac)
+          // dividing by a fraction is multiplying by its reciprocal
+          : $this->prettyFracMultiply($constFrac, ['n'=>$asFrac['d'], 'd'=>$asFrac['n']]);
+        continue;
+      }
+      $base = $leaf;
+      $exp = 1.0 * $sign;
+      if ($leaf['symbol'] === '^') {
+        $expVal = $this->prettyNumericValue($leaf['right']);
+        if ($expVal !== null) {
+          $base = $leaf['left'];
+          $exp = $expVal * $sign;
+        }
+      }
+      $key = $this->toString($base);
+      if (isset($indexOf[$key])) {
+        $groups[$indexOf[$key]]['exponent'] += $exp;
+      } else {
+        $indexOf[$key] = count($groups);
+        $groups[] = ['base'=>$base, 'exponent'=>$exp];
+      }
+    }
+    $constFrac = $this->prettyFracReduce($constFrac);
+    // numbers are always non-negative in this tree (negation is always a
+    // '~' wrapper); pull the sign out separately so it can be applied
+    // that way to whichever result the caller builds
+    $sign = ($constFrac['n'] < 0) ? -1 : 1;
+    $constFrac['n'] = abs($constFrac['n']);
+    return ['constFrac'=>$constFrac, 'sign'=>$sign, 'groups'=>$groups];
+  }
+
+  /**
+   * Combines a non-empty list of terms into a single left-associative '+'
+   * chain (mirroring prettyChainMultiply, but for addition).
+   * @param  array $terms
+   * @return array
+   */
+  private function prettyChainAdd($terms) {
+    $out = $terms[0];
+    for ($i = 1; $i < count($terms); $i++) {
+      $out = ['type'=>'operator', 'symbol'=>'+', 'left'=>$out, 'right'=>$terms[$i]];
+    }
+    return $out;
+  }
+
+  /**
+   * Returns each term's numeric coefficient (via prettyTermParts) as a
+   * plain whole number, or null if any term's coefficient isn't a clean,
+   * nonzero whole number (e.g. it's fractional, like 1/2 in 1/2x).
+   *
+   * Also bails out (returns null) if a term is itself a product or power
+   * that prettyTermParts couldn't pull any numeric coefficient out of at
+   * all (e.g. (x+1)*(x+3)^2, where neither factor is a plain number) -
+   * forcing a coefficient of 1 on such a term would hide it as one opaque
+   * unit, when it may have its own factor that could still algebraically
+   * cancel with the other side (like (x+3)^2 against a (x+3)
+   * denominator).  That cancellation is the general combiner's job, and
+   * it needs to see the term un-flattened to find it, so this function
+   * steps aside instead of joining a term whose only findings is that.
+   * @param  array $terms  list of sum-term nodes
+   * @param  int $level
+   * @return array|null  list of floats (whole-valued), or null
+   */
+  private function prettyIntegerCoefficients($terms, $level) {
+    $coefs = [];
+    foreach ($terms as $term) {
+      list($coef, $key, $base) = $this->prettyTermParts($term, $level);
+      if ($coef['d'] != 1.0 || floor($coef['n']) != $coef['n'] || $coef['n'] == 0.0) {
+        return null;
+      }
+      if ($base === $term && $term['type'] === 'operator' &&
+        ($term['symbol'] === '*' || $term['symbol'] === '^')
+      ) {
+        return null;
+      }
+      $coefs[] = $coef['n'];
+    }
+    return $coefs;
+  }
+
+  /**
+   * Rebuilds a sum term with its coefficient divided by a whole number.
+   * @param  array $term
+   * @param  int $divisor
+   * @param  int $level
+   * @return array
+   */
+  private function prettyDivideTermByInt($term, $divisor, $level) {
+    list($coef, $key, $base) = $this->prettyTermParts($term, $level);
+    return $this->prettyBuildTerm(['n'=>$coef['n'] / $divisor, 'd'=>$coef['d']], $base);
+  }
+
+  /**
+   * Negates a sum term by term (rather than wrapping the whole thing in
+   * a single '~'), so -(3x-4) becomes -3x+4 instead of -(3x-4).  Safe
+   * for any term regardless of shape, since negating just flips a sign
+   * and doesn't need a "clean" coefficient the way gcd extraction does.
+   * @param  array $sumNode  a '+'/'-' node
+   * @param  int $level
+   * @return array
+   */
+  private function prettyNegateSum($sumNode, $level) {
+    $terms = $this->prettyCommonFactorTerms($sumNode);
+    $negated = [];
+    foreach ($terms as $term) {
+      $negated[] = $this->prettyDivideTermByInt($term, -1, $level);
+    }
+    return $this->prettyChainAdd($negated);
+  }
+
+  /**
+   * Splits a (already combined) side of a division into its additive
+   * terms: a '+'/'-' node flattens into its terms, and anything else
+   * (a plain number, or a product like 2*y) is treated as a single term -
+   * prettyTermParts already knows how to pull a coefficient out of either
+   * shape (returning the whole node as the "base" with coefficient 1 if
+   * there's nothing to extract).
+   * @param  array $node
+   * @return array  non-empty list of term nodes
+   */
+  private function prettyCommonFactorTerms($node) {
+    if ($node['symbol'] === '+' || $node['symbol'] === '-') {
+      $terms = [];
+      $this->prettyFlattenSum($node, $terms);
+      return $terms;
+    }
+    return [$node];
+  }
+
+  /**
+   * When a division has a sum on one or both sides, looks for a whole-
+   * number common factor across every term's coefficient (numerator and
+   * denominator together, including a lone product's coefficient like
+   * the 2 in 2y) and divides it out, keeping the terms grouped with the
+   * division rather than letting the general combiner split a
+   * numerator's coefficient out front: (6x+4)/10 -> (3x+2)/5,
+   * (2x+4)/(8x+10) -> (x+2)/(4x+5), (6x+4)/(2y) -> (3x+2)/y.
+   * Also pulls a shared negative sign out of the denominator when every
+   * one of its terms is negative, so the denominator ends up positive:
+   * (3x-4)/(-2x) -> (-3x+4)/(2x), (-x+4)/(-x-5) -> (x-4)/(x+5).  A
+   * denominator with a mix of signs, like -x+5, is left alone.
+   * Deliberately limited to whole-number factors - a term with a
+   * variable base isn't considered (e.g. no attempt to cancel an x
+   * common to every term).  Returns null (falling back to other level-3
+   * handling) when neither side is a sum, or when either side's terms
+   * don't all have clean whole-number coefficients.
+   * @param  array $node  a '/' node
+   * @param  int $level
+   * @return array|null
+   */
+  private function prettyCombineCommonFactor($node, $level) {
+    $left = $this->prettyCombineNode($node['left'], $level);
+    $right = $this->prettyCombineNode($node['right'], $level);
+    $leftIsSum = ($left['symbol'] === '+' || $left['symbol'] === '-');
+    $rightIsSum = ($right['symbol'] === '+' || $right['symbol'] === '-');
+    if (!$leftIsSum && !$rightIsSum) {
+      return null;
+    }
+
+    $leftTerms = $this->prettyCommonFactorTerms($left);
+    $leftCoefs = $this->prettyIntegerCoefficients($leftTerms, $level);
+    if ($leftCoefs === null) {
+      return null;
+    }
+    $rightTerms = $this->prettyCommonFactorTerms($right);
+    $rightCoefs = $this->prettyIntegerCoefficients($rightTerms, $level);
+    if ($rightCoefs === null) {
+      return null;
+    }
+
+    $gcd = 0;
+    foreach (array_merge($leftCoefs, $rightCoefs) as $c) {
+      $gcd = $this->prettyGcd((int) round(abs($c)), $gcd);
+    }
+
+    // if every term of the denominator is negative (a lone negative term,
+    // like the -2 in -2x, counts too), treat that shared negative sign as
+    // part of the common factor so the denominator ends up positive:
+    // (3x-4)/(-2x) -> (-3x+4)/(2x), (-x+4)/(-x-5) -> (x-4)/(x+5).  A
+    // denominator with a mix of signs, like -x+5, is left alone.
+    $flipSign = true;
+    foreach ($rightCoefs as $c) {
+      if ($c >= 0) {
+        $flipSign = false;
+        break;
+      }
+    }
+    $divisor = $flipSign ? -$gcd : $gcd;
+
+    if ($divisor != 1) {
+      $divided = [];
+      foreach ($leftTerms as $term) {
+        $divided[] = $this->prettyDivideTermByInt($term, $divisor, $level);
+      }
+      $left = $this->prettyChainAdd($divided);
+      $divided = [];
+      foreach ($rightTerms as $term) {
+        $divided[] = $this->prettyDivideTermByInt($term, $divisor, $level);
+      }
+      $right = $this->prettyChainAdd($divided);
+    }
+    // dividing the denominator's own coefficient by the gcd can reduce it
+    // all the way down to 1 (e.g. (6x+2)/2 -> (3x+1)/1) - drop the
+    // division entirely rather than showing a pointless "/1"
+    if ($right['type'] === 'number' && (float) $right['symbol'] == 1.0) {
+      return $left;
+    }
+    // even with no common factor (gcd <= 1), keep the sum(s) grouped with
+    // the division rather than falling through to the general combiner's
+    // "coefficient times a parenthesized sum" split
+    return ['type'=>'operator', 'symbol'=>'/', 'left'=>$left, 'right'=>$right];
+  }
+
+  /**
+   * If a division's numerator was explicitly parenthesized in the
+   * original input (tagged 'wasparens'), and the denominator is (or
+   * combines down to) a plain number, keeps that grouping intact rather
+   * than letting the general combiner reformat it to "coefficient in
+   * front": (6pi)/8 -> (3pi)/4, not 3/4pi.  Falls back to the general
+   * combiner (returns null) whenever that grouping can't be cleanly
+   * preserved - e.g. the denominator itself has a variable in it, or the
+   * numerator has internal division of its own.
+   * @param  array $node  a '/' node
+   * @param  int $level
+   * @return array|null
+   */
+  private function prettyCombinePreserveDivision($node, $level) {
+    $left = $node['left'];
+    if (!(isset($left['info']) && $left['info'] === 'wasparens')) {
+      return null;
+    }
+    $combinedLeft = $this->prettyCombineNode($left, $level);
+    $combinedRight = $this->prettyCombineNode($node['right'], $level);
+
+    $rightFrac = $this->prettyAsFraction($combinedRight, $level);
+    if ($rightFrac === null) {
+      return null;
+    }
+
+    $leftFactors = [];
+    $this->prettyFlattenProductSide($combinedLeft, 1, $leftFactors);
+    $classified = $this->prettyClassifyFactors($leftFactors, $level);
+    if ($classified['constFrac']['n'] == 0.0) {
+      return ['type'=>'number', 'symbol'=>0.0];
+    }
+
+    // only handle the simple case: everything left over from the
+    // numerator is a straightforward positive-exponent factor (no
+    // internal division of its own to worry about)
+    $restFactors = [];
+    foreach ($classified['groups'] as $g) {
+      if ($g['exponent'] <= 0.0) {
+        return null;
+      }
+      $restFactors[] = ($g['exponent'] == 1.0) ? $g['base'] :
+        ['type'=>'operator', 'symbol'=>'^', 'left'=>$g['base'], 'right'=>['type'=>'number', 'symbol'=>$g['exponent']]];
+    }
+    if (empty($restFactors)) {
+      // numerator was purely numeric - nothing to keep grouped with, so
+      // there's no benefit over letting the general combiner handle it
+      return null;
+    }
+
+    // dividing the numerator's coefficient by the denominator's fraction
+    // is multiplying by its reciprocal
+    $newCoef = $this->prettyFracReduce([
+      'n' => $classified['constFrac']['n'] * $rightFrac['d'],
+      'd' => $classified['constFrac']['d'] * $rightFrac['n']
+    ]);
+    if ($newCoef['n'] == 0.0) {
+      return ['type'=>'number', 'symbol'=>0.0];
+    }
+
+    $rest = $this->prettyChainMultiply($restFactors);
+    $numerator = ($newCoef['n'] == 1.0) ? $rest :
+      ['type'=>'operator', 'symbol'=>'*', 'left'=>['type'=>'number', 'symbol'=>$newCoef['n']], 'right'=>$rest];
+    $result = ($newCoef['d'] == 1.0)
+      ? $numerator
+      // tagged so the renderer keeps this numerator visually grouped,
+      // same as prettyRebuildProduct's merged-coefficient case
+      : ['type'=>'operator', 'symbol'=>'/', 'left'=>$numerator, 'right'=>['type'=>'number', 'symbol'=>$newCoef['d']], 'info'=>'mergedcoef'];
+    return ($classified['sign'] < 0) ? $this->prettyNegateNode($result) : $result;
+  }
+
+  /**
+   * If no variable factor ends up in the denominator, the coefficient is
+   * kept as its own clean fraction multiplied in front of the (denominator-
+   * free) variable part (3/4x*1/2x -> 3/8x^2).  But if a variable factor
+   * IS left in the denominator, the coefficient's numerator/denominator
+   * are merged directly into the overall numerator/denominator instead of
+   * being split out, so that variable keeps its constant factor with it
+   * ((6x^2y+1)/(2x) stays that way; (6y)/(8x) only reduces the constant
+   * part -> (3y)/(4x); x/x^2 -> 1/x).
+   *
+   * A factor doesn't have to be a bare number to fold into the constant:
+   * it's also recognized if it's itself a clean fraction of two numbers
+   * (via prettyAsFraction), which happens when an earlier combine step
+   * has already reduced a sum to one, e.g. (1/2+1/3)/(1/3-1/4) simplifies
+   * each side to 5/6 and 1/12 before this runs, and folding those in as
+   * fractions (multiplying by the reciprocal on the denominator side)
+   * finishes the job: 5/6 / (1/12) -> 10, rather than stopping at
+   * (5/6)/(1/12).
+   * @param  array $factors  list of ['node'=>,'sign'=>] pairs
+   * @param  int $level
+   * @return array
+   */
+  private function prettyRebuildProduct($factors, $level) {
+    $classified = $this->prettyClassifyFactors($factors, $level);
+    $constFrac = $classified['constFrac'];
+    if ($constFrac['n'] == 0.0) {
+      return ['type'=>'number', 'symbol'=>0.0];
+    }
+    $overallSign = $classified['sign'];
+    $groups = $classified['groups'];
+
+    $numVarFactors = [];
+    $denVarFactors = [];
+    foreach ($groups as $g) {
+      if ($g['exponent'] == 0.0) {
+        continue;
+      }
+      if ($g['exponent'] > 0) {
+        $numVarFactors[] = ($g['exponent'] == 1.0) ? $g['base'] :
+          ['type'=>'operator', 'symbol'=>'^', 'left'=>$g['base'], 'right'=>['type'=>'number', 'symbol'=>$g['exponent']]];
+      } else {
+        $e = -$g['exponent'];
+        $denVarFactors[] = ($e == 1.0) ? $g['base'] :
+          ['type'=>'operator', 'symbol'=>'^', 'left'=>$g['base'], 'right'=>['type'=>'number', 'symbol'=>$e]];
+      }
+    }
+
+    if (empty($denVarFactors)) {
+      // no variable stuck in the denominator: coefficient stands alone as
+      // its own fraction, multiplied in front of the variable part
+      $coefNode = ($constFrac['d'] == 1.0)
+        ? ['type'=>'number', 'symbol'=>$constFrac['n']]
+        : ['type'=>'operator', 'symbol'=>'/', 'left'=>['type'=>'number', 'symbol'=>$constFrac['n']], 'right'=>['type'=>'number', 'symbol'=>$constFrac['d']]];
+      if (empty($numVarFactors)) {
+        $result = $coefNode;
+      } else {
+        $variablePart = $this->prettyChainMultiply($numVarFactors);
+        $result = ($constFrac['n'] == 1.0 && $constFrac['d'] == 1.0)
+          ? $variablePart
+          : ['type'=>'operator', 'symbol'=>'*', 'left'=>$coefNode, 'right'=>$variablePart];
+      }
+      return $overallSign < 0 ? $this->prettyNegateNode($result) : $result;
+    }
+
+    // a variable is left in the denominator: merge the coefficient's
+    // numerator/denominator into the overall fraction instead of
+    // splitting it out, so the constant stays with that variable
+    $numFactors = $numVarFactors;
+    $denFactors = $denVarFactors;
+    if ($constFrac['d'] != 1.0) {
+      array_unshift($denFactors, ['type'=>'number', 'symbol'=>$constFrac['d']]);
+    }
+    if ($constFrac['n'] != 1.0 || empty($numFactors)) {
+      array_unshift($numFactors, ['type'=>'number', 'symbol'=>$constFrac['n']]);
+    }
+    $numNode = $this->prettyChainMultiply($numFactors);
+    // tagged so the renderer keeps the numerator visually grouped as "one
+    // fraction" here specifically, without forcing parens on every
+    // product-over-something division (see prettyRenderNode's '/' case)
+    $result = ['type'=>'operator', 'symbol'=>'/', 'left'=>$numNode, 'right'=>$this->prettyChainMultiply($denFactors), 'info'=>'mergedcoef'];
+    return $overallSign < 0 ? $this->prettyNegateNode($result) : $result;
+  }
+
+  /**
+   * Combines a list of nodes into a single left-associative '*' chain.
+   * @param  array $nodes  non-empty list of AST nodes
+   * @return array
+   */
+  private function prettyChainMultiply($nodes) {
+    $out = $nodes[0];
+    for ($i = 1; $i < count($nodes); $i++) {
+      $out = ['type'=>'operator', 'symbol'=>'*', 'left'=>$out, 'right'=>$nodes[$i]];
+    }
+    return $out;
+  }
+
+  /**
+   * Extracts the largest perfect $index-th-power factor out of a
+   * non-negative whole number $n, via trial division: returns
+   * ['outside'=>o, 'inside'=>r] such that o^index * r == n, with r left
+   * as small as possible (e.g. extractRootFactor(8, 2) -> outside=2,
+   * inside=2, since sqrt(8) = 2*sqrt(2); extractRootFactor(4, 2) ->
+   * outside=2, inside=1, since sqrt(4) = 2).
+   * @param  float $n  non-negative whole number
+   * @param  int $index  root degree, >= 2
+   * @return array  ['outside'=>float, 'inside'=>float]
+   */
+  private function prettyExtractRootFactor($n, $index) {
+    if ($n == 0.0) {
+      return ['outside'=>0.0, 'inside'=>1.0];
+    }
+    $remaining = (int) round($n);
+    $outside = 1;
+    $inside = 1;
+    for ($p = 2; $p * $p <= $remaining; $p++) {
+      $count = 0;
+      while ($remaining % $p === 0) {
+        $remaining = intdiv($remaining, $p);
+        $count++;
+      }
+      if ($count > 0) {
+        $outside *= (int) pow($p, intdiv($count, $index));
+        $inside *= (int) pow($p, $count % $index);
+      }
+    }
+    // whatever's left is either 1 or a prime with exponent 1, too small
+    // to extract a copy of, so it stays inside the root
+    $inside *= $remaining;
+    return ['outside'=>(float) $outside, 'inside'=>(float) $inside];
+  }
+
+  /**
+   * Attempts to simplify sqrt/nthroot of a plain number or a clean
+   * fraction of two numbers, e.g. sqrt(4) -> 2, sqrt(8) -> 2*sqrt(2),
+   * sqrt(1/9) -> 1/3, root(3)(8) -> 2, root(3)(-8) -> -2.  An odd root of
+   * a negative input is evaluated by taking the root of its magnitude and
+   * negating the result; an even root of a negative input is undefined
+   * for reals, so that's left untouched.  Returns null (leaving the node
+   * untouched) when the input isn't a recognizable number/fraction, or
+   * when the denominator of a fraction input doesn't reduce to a whole
+   * number (rationalizing an irrational denominator is out of scope
+   * here).
+   * @param  array $input  the root's input node (already combined)
+   * @param  int $rootIndex  root degree, >= 2
+   * @param  int $level
+   * @return array|null
+   */
+  private function prettySimplifyRoot($input, $rootIndex, $level) {
+    $sign = 1;
+    while ($input['symbol'] === '~') {
+      $sign = -$sign;
+      $input = $input['left'];
+    }
+    if ($sign < 0 && $rootIndex % 2 === 0) {
+      // even root of a negative number is undefined for reals
+      return null;
+    }
+
+    $asFrac = $this->prettyAsFraction($input, $level);
+    if ($asFrac === null) {
+      if ($input['type'] !== 'number') {
+        return null;
+      }
+      $asFrac = ['n'=>(float) $input['symbol'], 'd'=>1.0];
+    }
+    if ($asFrac['n'] < 0.0 || $asFrac['d'] <= 0.0) {
+      return null;
+    }
+    if ($asFrac['n'] == 0.0) {
+      return ['type'=>'number', 'symbol'=>0.0];
+    }
+
+    $numParts = $this->prettyExtractRootFactor($asFrac['n'], $rootIndex);
+    $denParts = $this->prettyExtractRootFactor($asFrac['d'], $rootIndex);
+    if ($denParts['inside'] != 1.0) {
+      // an irrational denominator would be left behind; rationalizing it
+      // is out of scope, so leave the whole expression alone
+      return null;
+    }
+
+    $outsideFrac = $this->prettyFracReduce(['n'=>$numParts['outside'], 'd'=>$denParts['outside']]);
+    $insideVal = $numParts['inside'];
+    if ($insideVal == 1.0) {
+      // fully reduces to a rational number
+      $result = ($outsideFrac['d'] == 1.0)
+        ? ['type'=>'number', 'symbol'=>$outsideFrac['n']]
+        : ['type'=>'operator', 'symbol'=>'/', 'left'=>['type'=>'number', 'symbol'=>$outsideFrac['n']], 'right'=>['type'=>'number', 'symbol'=>$outsideFrac['d']]];
+      return ($sign < 0) ? $this->prettyNegateNode($result) : $result;
+    }
+
+    $rootNode = ($rootIndex === 2)
+      ? ['type'=>'function', 'symbol'=>'sqrt', 'input'=>['type'=>'number', 'symbol'=>$insideVal]]
+      : ['type'=>'function', 'symbol'=>'nthroot', 'input'=>['type'=>'number', 'symbol'=>$insideVal], 'index'=>['type'=>'number', 'symbol'=>(float) $rootIndex]];
+    if ($outsideFrac['n'] == 1.0 && $outsideFrac['d'] == 1.0) {
+      return ($sign < 0) ? $this->prettyNegateNode($rootNode) : $rootNode;
+    }
+    $coefNode = ($outsideFrac['d'] == 1.0)
+      ? ['type'=>'number', 'symbol'=>$outsideFrac['n']]
+      : ['type'=>'operator', 'symbol'=>'/', 'left'=>['type'=>'number', 'symbol'=>$outsideFrac['n']], 'right'=>['type'=>'number', 'symbol'=>$outsideFrac['d']]];
+    $result = ['type'=>'operator', 'symbol'=>'*', 'left'=>$coefNode, 'right'=>$rootNode];
+    return ($sign < 0) ? $this->prettyNegateNode($result) : $result;
+  }
+
+  /**
+   * True if the (pretty-simplified) node represents a negated quantity
+   * @param  array $node
+   * @return boolean
+   */
+  private function prettyIsNegative($node) {
+    return $node['symbol'] === '~';
+  }
+
+  /**
+   * Precedence used purely for deciding parentheses when pretty-printing.
+   * Higher binds tighter.  Atomic items (numbers, variables, functions)
+   * are always self-delimited so they get the highest value.
+   * @param  array $node
+   * @return float
+   */
+  private function prettyPrecedence($node) {
+    if ($node['type'] !== 'operator') {
+      return 100;
+    }
+    switch ($node['symbol']) {
+      case '||': case '#o': case '#i': case '#b':
+        return -6;
+      case '#x':
+        return -5;
+      case '&&': case '#a': case '#m':
+        return -4;
+      case 'not':
+        return 100; // self-delimited, prints as not(...)
+      case '<': case '>': case '<=': case '>=':
+        return -2;
+      case '+': case '-':
+        return 1;
+      case '~':
+        return 1.5;
+      case '*': case '/':
+        return 2;
+      case '^':
+        return 4;
+      default:
+        return 1;
+    }
+  }
+
+  /**
+   * Decides how two multiplied factors should be joined when rendering
+   * with implicit multiplication enabled, based on the boundary
+   * characters between the two rendered pieces:
+   *  - two numbers never get merged (2*3 stays 2*3, not 23)
+   *  - a trailing "word-like" piece (variable/function name) followed by
+   *    another letter or a digit gets a space so they don't read as one
+   *    longer identifier (x*y -> x y, x*sin(x) -> x sin(x),
+   *    (x/y)*3 -> x/y 3, not x/y3)
+   *  - everything else (e.g. a number or variable next to a
+   *    parenthesized group) is simply juxtaposed (4x, x(x+1), 4(x+1),
+   *    (x+1)(x-1))
+   * @param  string $leftStr
+   * @param  string $rightStr
+   * @return string  '*', ' ', or ''
+   */
+  private function prettyImplicitJoiner($leftStr, $rightStr) {
+    $lastChar = substr($leftStr, -1);
+    $firstChar = substr($rightStr, 0, 1);
+    $isNumBoundary = function($c) { return $c !== '' && (ctype_digit($c) || $c === '.'); };
+    $isLetterBoundary = function($c) { return $c !== '' && ctype_alpha($c); };
+    if ($firstChar === '-' || ($isNumBoundary($lastChar) && $isNumBoundary($firstChar))) {
+      return '*';
+    }
+    if ($isLetterBoundary($lastChar) && ($isLetterBoundary($firstChar) || $isNumBoundary($firstChar))) {
+      return ' ';
+    }
+    return '';
+  }
+
+  /**
+   * Flattens a maximal chain of '*' nodes into an ordered list of factors.
+   * Does not cross into '/' (or anything else) - those are treated as a
+   * single opaque factor, left in place rather than reordered.
+   * @param  array $node
+   * @param  array $factors  (by reference) collected factor nodes, in order
+   * @return void
+   */
+  private function prettyFlattenMulChain($node, &$factors) {
+    if ($node['symbol'] === '*') {
+      $this->prettyFlattenMulChain($node['left'], $factors);
+      $this->prettyFlattenMulChain($node['right'], $factors);
+    } else {
+      $factors[] = $node;
+    }
+  }
+
+  /**
+   * Renders a non-empty, already-ordered list of factors as a '*' chain,
+   * parenthesizing each factor that needs it individually.
+   * @param  array $factors
+   * @return string
+   */
+  private function prettyRenderFactorChain($factors) {
+    $out = '';
+    foreach ($factors as $i => $f) {
+      $str = $this->prettyRenderNode($f);
+      if ($this->prettyPrecedence($f) < 2) {
+        $str = '(' . $str . ')';
+      }
+      if ($i === 0) {
+        $out = $str;
+      } else {
+        $joiner = $this->prettyImplicitMult ? $this->prettyImplicitJoiner($out, $str) : '*';
+        $out .= $joiner . $str;
+      }
+    }
+    return $out;
+  }
+
+  /**
+   * The display name (everything before the final "(input)") for a
+   * function node, reconstructing the special-cased syntax the parser
+   * accepts on the way in:
+   *  - funcvar shows the variable acting as a function (v(x) not funcvar(x))
+   *  - log with a base other than 10 shows the base (log_3(x)), the
+   *    natural log shows as ln(x), and the default base 10 just shows log(x)
+   *  - nthroot shows as root(N)(x)
+   *  - an arcsin/arccos/etc. node created from sin^-1(x)-style input
+   *    (marked with info='waspower' at parse time) shows back as
+   *    sin^-1(x) rather than arcsin(x), preserving the original notation
+   * @param  array $node  a 'function' type node
+   * @return string
+   */
+  private function prettyFunctionName($node) {
+    if ($node['symbol'] === 'funcvar') {
+      return $this->prettyRenderNode($node['index']);
+    }
+    if ($node['symbol'] === 'log' && isset($node['index'])) {
+      $idx = $node['index'];
+      if ($idx['type'] === 'number') {
+        $val = (float) $idx['symbol'];
+        if (abs($val - 10.0) < 1e-9) {
+          return 'log';
+        }
+        if (abs($val - M_E) < 1e-9) {
+          return 'ln';
+        }
+      }
+      return 'log_' . $this->prettyRenderNode($idx);
+    }
+    if ($node['symbol'] === 'nthroot' && isset($node['index'])) {
+      return 'root(' . $this->prettyRenderNode($node['index']) . ')';
+    }
+    if (isset($node['info']) && $node['info'] === 'waspower') {
+      return substr($node['symbol'], 3) . '^-1';
+    }
+    return $node['symbol'];
+  }
+
+  /**
+   * Renders an already pretty-simplified node as a string with minimal
+   * parentheses.
+   * @param  array $node
+   * @return string
+   */
+  private function prettyRenderNode($node) {
+    if ($node['type'] === 'number' || $node['type'] === 'variable') {
+      return (string) $node['symbol'];
+    }
+    if ($node['type'] === 'function') {
+      return $this->prettyFunctionName($node) . '(' . $this->prettyRenderNode($node['input']) . ')';
+    }
+
+    $symbol = $node['symbol'];
+
+    if ($symbol === '~') {
+      $inner = $this->prettyRenderNode($node['left']);
+      if ($this->prettyPrecedence($node['left']) < 2) {
+        $inner = '(' . $inner . ')';
+      }
+      return '-' . $inner;
+    }
+
+    if ($symbol === 'not') {
+      return 'not(' . $this->prettyRenderNode($node['left']) . ')';
+    }
+
+    if ($symbol === '+' || $symbol === '-') {
+      $left = $node['left'];
+      $right = $node['right'];
+      $dispSymbol = $symbol;
+      if ($this->prettyIsNegative($right)) {
+        $dispSymbol = ($symbol === '+') ? '-' : '+';
+        $right = $right['left'];
+      }
+      $leftStr = $this->prettyRenderNode($left);
+      if ($this->prettyPrecedence($left) < 1) {
+        $leftStr = '(' . $leftStr . ')';
+      }
+      $rightStr = $this->prettyRenderNode($right);
+      $rightPrec = $this->prettyPrecedence($right);
+      $rightNeedsParens = ($dispSymbol === '-') ? ($rightPrec <= 1) : ($rightPrec < 1);
+      if ($rightNeedsParens) {
+        $rightStr = '(' . $rightStr . ')';
+      }
+      return $leftStr . $dispSymbol . $rightStr;
+    }
+
+    if ($symbol === '*') {
+      // flatten the whole chain of factors (not crossing into '/') and
+      // stable-partition it so factors that don't need parens display
+      // first, ahead of the ones that do.  Otherwise a bare factor can
+      // get stranded in the middle of a chain of parenthesized ones:
+      // (x+3)(x)(x-4) reads as x(x+3)(x-4) instead
+      $factors = [];
+      $this->prettyFlattenMulChain($node, $factors);
+      $simple = [];
+      $complex = [];
+      foreach ($factors as $f) {
+        if ($this->prettyPrecedence($f) < 2) {
+          $complex[] = $f;
+        } else {
+          $simple[] = $f;
+        }
+      }
+      return $this->prettyRenderFactorChain(array_merge($simple, $complex));
+    }
+
+    if ($symbol === '/') {
+      $left = $node['left'];
+      $right = $node['right'];
+      $leftStr = $this->prettyRenderNode($left);
+      // parens aren't mathematically required around a product/quotient
+      // used as a division's numerator (a*b/c == (a*b)/c, and a/b/c ==
+      // (a/b)/c), since left-to-right evaluation reconstructs the same
+      // value either way.  Normally we leave them off (15*x/3 shouldn't
+      // become (15*x)/3, and 1/3*x/5 shouldn't become (1/3*x)/5), unless
+      // something specifically calls for keeping that numerator visually
+      // grouped as "one fraction" for a human reader: either the level-3
+      // combiner merged a numeric coefficient into it alongside a
+      // variable stuck in the denominator (tagged 'mergedcoef' by
+      // prettyRebuildProduct), or the original input explicitly
+      // parenthesized it (tagged 'wasparens' by handleSubExpression, e.g.
+      // (5*pi)/3 keeping its numerator grouped as (5pi)/3, and
+      // (2/3)/x keeping its numerator grouped as (2/3)/x rather than the
+      // ambiguous-looking 2/3/x)
+      $leftNeedsParens = ($this->prettyPrecedence($left) < 2) ||
+        (($left['symbol'] === '*' || $left['symbol'] === '/') &&
+          ((isset($node['info']) && $node['info'] === 'mergedcoef') ||
+           (isset($left['info']) && $left['info'] === 'wasparens')));
+      if ($leftNeedsParens) {
+        $leftStr = '(' . $leftStr . ')';
+      }
+      $rightStr = $this->prettyRenderNode($right);
+      $rightPrec = $this->prettyPrecedence($right);
+      $rightNeedsParens = ($rightPrec <= 2);
+      if ($rightNeedsParens) {
+        $rightStr = '(' . $rightStr . ')';
+      }
+      return $leftStr . '/' . $rightStr;
+    }
+
+    if ($symbol === '^') {
+      $left = $node['left'];
+      $right = $node['right'];
+      if ($left['type'] === 'function' && empty($left['index']) && $right['type'] === 'number' && 
+        isset($node['info']) && $node['info']=='wasshorthand') {
+        // reconstruct sin^2(x)-style notation for a plain function raised
+        // to a whole-number power.  -1 is skipped since re-parsing
+        // "sin^-1(x)" would turn it into arcsin(x), a different function
+        $expVal = (float) $right['symbol'];
+        if ($expVal != -1.0 && floor($expVal) == $expVal) {
+          return $left['symbol'] . '^' . $this->prettyRenderNode($right) . '(' . $this->prettyRenderNode($left['input']) . ')';
+        }
+      }
+      $leftStr = $this->prettyRenderNode($left);
+      // a function call is atomic precedence-wise (no ambiguity about what
+      // the ^ applies to), but log(x)^3 still reads as if it could mean
+      // log(x^3), so parenthesize it for clarity when not using the
+      // compact func^power(x) notation handled above
+      if ($this->prettyPrecedence($left) <= 4 || $left['type'] === 'function') {
+        $leftStr = '(' . $leftStr . ')';
+      }
+      $rightStr = $this->prettyRenderNode($right);
+      if ($this->prettyPrecedence($right) < 4) {
+        $rightStr = '(' . $rightStr . ')';
+      }
+      return $leftStr . '^' . $rightStr;
+    }
+
+    // fallback: comparisons / logical operators
+    $prec = $this->prettyPrecedence($node);
+    $leftStr = $this->prettyRenderNode($node['left']);
+    if ($this->prettyPrecedence($node['left']) < $prec) {
+      $leftStr = '(' . $leftStr . ')';
+    }
+    $rightStr = $this->prettyRenderNode($node['right']);
+    if ($this->prettyPrecedence($node['right']) < $prec) {
+      $rightStr = '(' . $rightStr . ')';
+    }
+    return $leftStr . $symbol . $rightStr;
   }
 
   public function removeOneTimes() {
@@ -1594,8 +3099,7 @@ function acsc($x) {
 }
 function acot($x) {
     if (abs($x)<1e-16) {
-        echo "Invalid input for arccot";
-        return NAN;
+        return M_PI/2;
     }
     return atan(1/$x);
 }
@@ -1675,13 +3179,23 @@ function cplx_div($n,$d) {
   return [($n[0]*$d[0] + $n[1]*$d[1])/$ds, ($n[1]*$d[0]-$n[0]*$d[1])/$ds];
 }
 function cplx_sqrt($z) {
-  return cplx_nthroot($z,2);
+  return cplx_nthroot($z,[2,0]);
 }
 function cplx_nthroot($z,$b) {
+  /*if ($b[1] != 0) {
+    throw new MathParserException("Can only handle real roots of complex numbers");
+  }
   $r = $z[0]*$z[0] + $z[1]*$z[1];
-  $m = safepow($r, $b/(2*$b));
+  $m = safepow($r, 1/(2*$b[0]));
   $t = atan2($z[1],$z[0]);
-  return [$m*cos($t/$b), $m*sin($t/$b)];
+  return [$m*cos($t/$b[0]), $m*sin($t/$b[0])];
+  */
+  // z^(1/b) = exp(1/b*ln(z))   
+  $invb = cplx_div([1,0],$b);
+  $logz = [log(safepow($z[0]*$z[0]+$z[1]*$z[1], 1/2)), atan2($z[1],$z[0])];
+  $mult = cplx_mult($invb, $logz);
+  $m = exp($mult[0]);
+  return [$m*cos($mult[1]), $m*sin($mult[1])];
 }
 function cplx_log($z, $b = M_E) {
   $r = sqrt($z[0]*$z[0] + $z[1]*$z[1]);

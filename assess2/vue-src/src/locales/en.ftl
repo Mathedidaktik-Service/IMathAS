@@ -49,15 +49,17 @@ launch-view_as_stu = Acting as student: {$name}
 launch-scorelist = Score List
 launch-itemanalysis = Item Analysis
 launch-gblinks = Gradebook Links
+launch-a11ywarn = If you are using a screenreader, you should turn on the graph and drawing accessibility options.
 
 # Closed section
 closed-hidden = This assessment is not currently available.
 closed-notyet = This assessment is not yet available. It will be available {$sd} until {$ed}.
 closed-pastdue = This assessment was due {$ed}.
 closed-pasttime = The timelimit has expired on this assessment.
-closed-needprereq = You have not yet met the prerequisite requirements to work on this assessment.
-closed-prereqreq = A score of {$score} on {$name} is required.
+closed-needprereq = You have not yet met the prerequisite requirements to work on this assessment
+closed-prereqreq = Prerequisite: {$str}.
 closed-no_attempts = You have used all your attempts at this assessment.
+closed-retakewait = This assessment requires a break between retakes. You can retake the assessment at: {$date}.
 closed-latepassn = 
     { $n ->
         [one] You have one LatePass available.
@@ -108,6 +110,8 @@ setlist-latepass_used =
 setlist-extension = You were granted an extension.
 setlist-penalty = A penalty of {$p}% will be applied.
 setlist-penalty_after = A penalty of {$p}% will be applied after {$date}.
+setlist-penalty_interval = A penalty of {$p}% every {$hrs} hours is being applied for late work; a {$cur}% penalty currently applies.
+setlist-penalty_interval_after = A penalty of {$p}% every {$hrs} hours will be applied after {$date}.
 setlist-earlybonus = A bonus of {$p}% will be applied until {$date}.
 setlist-take = 
     { $n ->
@@ -140,12 +144,19 @@ setlist-timelimit_wgrace_restricted_penalty = Time limit: {$time}, with a grace 
 setlist-timelimit_ext = You have been given a {$n} minute extension on the time limit
 setlist-timelimit_ext_used = You have used a {$n} minute timelimit extension
 setlist-excused = You have been excused from this assignment. It will not be counted in your grade.
+setlist-submitnote = Submit your unsubmitted attempt for scoring.
+setlist-submitretake = Submit your unsubmitted attempt for scoring and to be able to retake the assessment.
 setlist-latepass_needed = 
     { $n ->
         [one] You can redeem one LatePass to extend the due date to {$date}
         *[other] You can redeem {$n} LatePasses to extend the due date to {$date}
     }
-
+setlist-retakewait = 
+    { $n ->
+        [one] You must wait 1 hour between retakes
+        *[other] You must waitn {$n} hours between retakes
+    }
+    
 # Group
 group-isgroup = This is a group assessment.
 group-teacher_auto = This assessment allows students to select their own group members, up to {$n}.
@@ -198,6 +209,66 @@ question-uploading = Uploading...
 question-intronext = To begin, navigate to a question using the selector or > Next button above.
 question-firstq = First Question
 
+# Drill
+drill-goal_time_maxcorrect = Do as many questions as possible in {$n} seconds.
+drill-goal_count_time = Complete {$n} questions as quickly as possible.
+drill-goal_count_correct_time = Complete {$n} questions correctly as quickly as possible.
+drill-goal_count_correct_attempts = Complete {$n} questions correctly with as few errors as possible.
+drill-goal_streak_time = Complete {$n} questions correctly in a row as quickly as possible.
+drill-goal_streak_attempts = Complete {$n} questions correctly in a row with as few errors as possible.
+drill-start = Start
+drill-incorrect_tryagain = Incorrect. Try again.
+drill-partial_tryagain = Partially incorrect. Try again.
+drill-correct_next = Correct. Try the next question.
+drill-incorrect_next = Incorrect, and out of tries. Try the next question.
+drill-partial_next = Partially incorrect, and out of tries. Try the next question.
+drill-outoftries = Out of tries. Review the answer below, then continue.
+drill-next = Next Question
+drill-complete = Nice work!
+drill-restart = Try Again
+drill-result_time_maxcorrect =
+    { $correct ->
+        [one] In {$n} seconds limit, 1 question correct.
+        *[other] In {$n} seconds limit, {$correct} questions correct.
+    }
+drill-result_count_time =
+    { $n ->
+        [one] Attempted 1 question in {$time} seconds.
+        *[other] Attempted {$n} questions in {$time} seconds.
+    }
+drill-result_count_correct_time =
+    { $n ->
+        [one] 1 question correct in {$time} seconds.
+        *[other] {$n} questions correct in {$time} seconds.
+    }
+drill-result_count_correct_attempts =
+    { $n ->
+        [one] 1 question correct in {$attempts} attempts.
+        *[other] {$n} questions correct in {$attempts} attempts.
+    }
+drill-result_streak_time =
+    { $n ->
+        [one] 1 question correct in a row in {$time} seconds.
+        *[other] {$n} questions correct in a row in {$time} seconds.
+    }
+drill-result_streak_attempts =
+    { $n ->
+        [one] 1 question correct in a row in {$attempts} attempts.
+        *[other] {$n} questions correct in a row in {$attempts} attempts.
+    }
+drill-progress_time_maxcorrect =
+    { $count ->
+        [one] Progress: 1 question correct.
+        *[other] Progress: {$count} questions correct.
+    }
+drill-progress_count_time = Progress: {$count} of {$n} questions attempted.
+drill-progress_count_correct = Progress: {$count} of {$n} questions answered correctly.
+drill-progress_streak = Progress: Streak of {$count} out of {$n} correct in a row.
+drill-best_correct = Personal best: {$n} correct
+drill-best_time = Personal best: {$n} seconds
+drill-best_attempts = Personal best: {$n} attempts
+drill-history_title = Drill Attempt History
+
 # Header
 header-score = Score: {$pts}/{$poss}
 header-practicescore = Practice score: {$pts}/{$poss}
@@ -207,6 +278,7 @@ header-possible =
         *[other] {$n} points possible
     }
 header-answered = Answered: {$n}/{$tot}
+header-drills_completed = Drills completed: {$n}/{$tot}
 header-assess_submit = Submit and End
 header-done = Done
 header-resources_header = Resources
@@ -227,6 +299,7 @@ header-work_save_avail = Save progress button available
 header-work_saving = Saving...
 header-confirm_assess_submit = After submitting, you will not be able to change your answers on this version of the assessment. Are you ready to submit?
 header-confirm_assess_unattempted_submit = There appears to be unattempted questions. After submitting, you will not be able to change your answers on this version of the assessment. Are you ready to submit?
+header-confirm_assess_nowork_submit = You have not added any work. After submitting, you will not be able to add work on this version of the assessment. Are you ready to submit?
 header-preview_all = Instructor Preview of All Questions
 
 # Resource
@@ -292,9 +365,15 @@ scoreresult-submitted = Question submitted.
 scoreresult-see_details = See Details for more.
 scoreresult-manual_grade = This question contains parts that must be graded by your instructor. They will show a score of 0 until they are graded.
 scoreresult-jumptoincorrect = Jump to first changable incorrect part
-scoreresult-jumptolast = Jump to last submitted part
+scoreresult-jumptoincorrectstart = Jump to start of first changable incorrect part
+scoreresult-jumptolast = Jump to after last submitted part
 scoreresult-allpartscorrect = All submitted parts correct.
 scoreresult-onepartincorrect = At least one scored part is incorrect.
+
+# Sequential Score results
+seqresult-incorrect = One or more answers were incorrect
+seqresult-continue = Continue working on this part
+seqresult-next = Continue to the next part
 
 # Summary
 summary-no_total = Your assessment has been submitted.
@@ -633,6 +712,8 @@ work-duein = Work must be submitted by {$date}
 work-save_continue = Save Work and Continue
 work-add_prev = You can still show or attach work for the previous attempt
 work-remove = Are you sure you want to remove this file?
+work-all = Add work here for all questions
+work-gbtitle = Work
 
 # Regions
 regions-questions = Questions and text
@@ -656,3 +737,4 @@ latepass-reason6 = LatePasses cannot be used because you do not have enough Late
 latepass-reason7 = LatePasses cannot be used because you have opened this assessment in Practice Mode, and that blocks use of LatePasses.
 latepass-reason8 = LatePasses cannot be used because you have reviewed this assessment in the Gradebook, and that blocks use of LatePasses.
 latepass-reason9 = LatePasses cannot be used because you are out of attempts.
+latepass-reason10 = LatePasses cannot be used because the late penalty is already 100% or more.

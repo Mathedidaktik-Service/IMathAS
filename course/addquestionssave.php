@@ -2,6 +2,7 @@
 //IMathAS:  Save changes to addquestions submitted through AHAH
 //(c) 2007 IMathAS/WAMAP Project
 	require_once "../init.php";
+	require_once "../includes/viddatautil.php";
 	$cid = Sanitize::courseId($_GET['cid']);
 	$aid = Sanitize::onlyInt($_GET['aid']);
 	if (!isset($teacherid)) {
@@ -9,9 +10,9 @@
         exit;
     }
     
-	$stm = $DBH->prepare("SELECT itemorder,viddata,intro,defpoints,courseid,ver,showhints,showwork FROM imas_assessments WHERE id=:id");
+	$stm = $DBH->prepare("SELECT itemorder,viddata,intro,defpoints,courseid,ver,showhints,showwork,drilljson,displaymethod FROM imas_assessments WHERE id=:id");
 	$stm->execute(array(':id'=>$aid));
-	list($rawitemorder, $viddata,$current_intro_json, $defpoints,$assesscourseid,$aver,$showhints,$showwork) = $stm->fetch(PDO::FETCH_NUM);
+	list($rawitemorder, $viddata,$current_intro_json, $defpoints,$assesscourseid,$aver,$showhints,$showwork,$rawdrilljson,$assessdisplaymethod) = $stm->fetch(PDO::FETCH_NUM);
 	if ($assesscourseid != $cid) {
 		echo "error: invalid ID";
 		exit;
@@ -34,7 +35,7 @@
 	}
 
     if (isset($_POST['addnewdef'])) {
-        if (!isset($_POST['lastitemhash']) || md5($rawitemorder) !== $_POST['lastitemhash']) {
+        if (!isset($_POST['lastitemhash']) || md5($rawitemorder . $current_intro_json) !== $_POST['lastitemhash']) {
             echo '{"error": "assessment questions have changed elsewhere. Reload the page and try again."}';
             exit;
         }
@@ -60,41 +61,17 @@
         //add to itemorder
         if ($_POST['asgroup'] == 1) {
             $newitems = '1|0~'.implode('~', $qids);
+            $numnew = 1;
         } else {
             $newitems = implode(',', $qids);
+            $numnew = count($qids);
         }
         if ($rawitemorder=='') {
             $itemorder = $newitems;
         } else {
             $itemorder  = $rawitemorder . "," . $newitems;
         }
-        if ($viddata != '') {
-            $nextnum = 0;
-            if ($rawitemorder!='') {
-                foreach (explode(',', $rawitemorder) as $iv) {
-                    if (strpos($iv,'|')!==false) {
-                        $choose = explode('|', $iv);
-                        $nextnum += $choose[0];
-                    } else {
-                        $nextnum++;
-                    }
-                }
-            }
-            $numnew= count($qids);
-            $viddata = unserialize($viddata);
-            if (!isset($viddata[count($viddata)-1][1])) {
-                $finalseg = array_pop($viddata);
-            } else {
-                $finalseg = '';
-            }
-            for ($i=$nextnum;$i<$nextnum+$numnew;$i++) {
-                $viddata[] = array('','',$i);
-            }
-            if ($finalseg != '') {
-                $viddata[] = $finalseg;
-            }
-            $viddata = serialize($viddata);
-        }
+        $viddata = appendBlankVidSegments($rawitemorder, $numnew, $viddata);
         $stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata WHERE id=:id");
         $stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':id'=>$aid));
 
@@ -110,22 +87,26 @@
             'showhints' => $showhints
         ]);
         
-        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder)], 
+        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder . $current_intro_json)], 
             JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE);
         exit;
     } else if (isset($_POST['addnew'])) {
 
     } 
 
+	function removeGrpNames($order) {
+		return preg_replace('/(\d+\|\d+)\|.*?~/', '$1~', $order);
+	}
+
 	if (!isset($_POST['order']) || !isset($_POST['text_order']) || !isset($_POST['lastitemhash'])) {
 		echo "error: missing required values";
 		exit;
     }
-    if ($beentaken && $rawitemorder != $_REQUEST['order']) {
+    if ($beentaken && removeGrpNames($rawitemorder) != removeGrpNames($_REQUEST['order'])) {
         echo 'error: '._('Students have started the assessment, and you cannot change questions or order after students have started; reload the page');
         exit;
     }
-    if (md5($rawitemorder) !== $_POST['lastitemhash']) {
+    if (md5($rawitemorder . $current_intro_json) !== $_POST['lastitemhash']) {
         echo "error: assessment questions have changed elsewhere. Reload the page and try again.";
         exit;
     }
@@ -166,97 +147,22 @@
 	$submitted = $_REQUEST['order'];
 	$submitted = str_replace('~',',',$submitted);
 	$newitems = array();
-	foreach (explode(',',$submitted) as $qid) {
-		if (strpos($qid,'|')===false) {
-			$newitems[] = Sanitize::onlyInt($qid);
+	if ($submitted !== '') {
+		foreach (explode(',',$submitted) as $qid) {
+			if (strpos($qid,'|')===false) {
+				$newitems[] = Sanitize::onlyInt($qid);
+			}
 		}
 	}
 	$toremove = array_diff($curitems,$newitems);
+	if (!empty(array_diff($newitems, $curitems))) {
+		// this would mean there's a qid in the itemorder that didn't previously exist
+		echo "error: invalid item in order";
+        exit;
+	}
 
 	if ($viddata != '') {
-		$viddata = unserialize($viddata);
-		$qorder = explode(',',$rawitemorder);
-		$qidbynum = array();
-		$k = 0;
-		for ($i=0;$i<count($qorder);$i++) {
-			if (strpos($qorder[$i],'~')!==false) {
-				$qids = explode('~',$qorder[$i]);
-				if (strpos($qids[0],'|')!==false) { //pop off nCr
-					$choose = explode('|', $qids[0]);
-					for ($j=0;$j<$choose[0];$j++) { // add the number from pool we're using
-						$qidbynum[$k] = $qids[1+$j];
-						$k++;
-					}
-				} else {
-					$qidbynum[$k] = $qids[0];
-					$k++;
-				}
-			} else {
-				$qidbynum[$k] = $qorder[$i];
-				$k++;
-			}
-		}
-
-		$qorder = explode(',',$_REQUEST['order']);
-		$newbynum = array();
-		if (trim($_REQUEST['order'])!='') {
-			$k=0;
-			for ($i=0;$i<count($qorder);$i++) {
-				if (strpos($qorder[$i],'~')!==false) {
-					$qids = explode('~',$qorder[$i]);
-					if (strpos($qids[0],'|')!==false) { //pop off nCr
-						$choose = explode('|', $qids[0]);
-						for ($j=0;$j<$choose[0];$j++) { // add the number from pool we're using
-							$newbynum[$k] = $qids[1+$j];
-							$k++;
-						}
-					} else {
-						$newbynum[$k] = $qids[0];
-						$k++;
-					}
-				} else {
-					$newbynum[$k] = $qorder[$i];
-					$k++;
-				}
-			}
-		}
-
-		$qidbynumflip = array_flip($qidbynum);
-
-		$newviddata = array();
-		$newviddata[0] = $viddata[0];
-		for ($i=0;$i<count($newbynum);$i++) {   //for each new item
-			if (!isset($qidbynumflip[$newbynum[$i]])) {
-				// could happen if n in group is increased
-				$newviddata[] =  array('','',$i);
-				continue;
-			}
-			$oldnum = $qidbynumflip[$newbynum[$i]];
-			$found = false; //look for old item in viddata
-			for ($j=1;$j<count($viddata);$j++) {
-				if (isset($viddata[$j][2]) && $viddata[$j][2]==$oldnum) {
-					//if found, copy data, and any non-question data following
-					$new = $viddata[$j];
-					$new[2] = $i;  //update question number;
-					$newviddata[] = $new;
-					$j++;
-					while (isset($viddata[$j]) && !isset($viddata[$j][2])) {
-						$newviddata[] = $viddata[$j];
-						$j++;
-					}
-					$found = true;
-					break;
-				}
-			}
-			if (!$found) {
-				//item was not found in viddata.  it should have been.
-				//count happen if the first item in a group was removed, perhaps
-				//Add a blank item
-				$newviddata[] =  array('','',$i);
-			}
-		}
-		//any old items will not get copied.
-		$viddata = serialize($newviddata);
+		$viddata = remapVidData($rawitemorder, $_REQUEST['order'], $viddata);
 	}
 
 	$DBH->beginTransaction();
@@ -291,6 +197,29 @@
 		}
     }
 
+	//update drill display names
+	$drilljsonchanged = false;
+	if ($assessdisplaymethod == 'drill' && isset($_POST['dispnames'])) {
+		$newdispnames = json_decode($_POST['dispnames'], true);
+		if (is_array($newdispnames)) {
+			$drilljson = ($rawdrilljson != '') ? json_decode($rawdrilljson, true) : array();
+			if (!is_array($drilljson)) { $drilljson = array(); }
+			$dispnames = array();
+			$stm = $DBH->prepare("SELECT id FROM imas_questions WHERE assessmentid=?");
+			$stm->execute(array($aid));
+			while ($qrow = $stm->fetch(PDO::FETCH_ASSOC)) {
+				$qkey = 'qn' . $qrow['id'];
+				if (!empty($newdispnames[$qkey])) {
+					$dispnames[$qkey] = Sanitize::stripHtmlTags($newdispnames[$qkey]);
+				}
+			}
+			$drilljson['dispnames'] = $dispnames;
+			$upd_drilljson = $DBH->prepare("UPDATE imas_assessments SET drilljson=? WHERE id=? AND courseid=?");
+			$upd_drilljson->execute(array(json_encode($drilljson), $aid, $cid));
+			$drilljsonchanged = ($upd_drilljson->rowCount() > 0);
+		}
+	}
+
 	$qarr = array(':itemorder'=>$_REQUEST['order'], ':viddata'=>$viddata, ':intro'=>$new_intro, ':id'=>$aid, ':courseid'=>$cid);
 	$query = "UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata,intro=:intro";
 	if (isset($_POST['defpts'])) {
@@ -324,8 +253,12 @@
 		$stm = $DBH->prepare($query);
 		$stm->execute(array($cid, $aid));
 
-        echo md5($_REQUEST['order']);
+        echo md5($_REQUEST['order'] . $new_intro);
 		//echo "OK";
+	} else if ($drilljsonchanged) {
+		// itemorder/points didn't change, but the drill display names did;
+		// the hash is unchanged since it doesn't depend on drilljson
+		echo md5($_REQUEST['order'] . $new_intro);
 	} else {
 		echo "error: not saved";
 	}

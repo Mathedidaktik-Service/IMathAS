@@ -7,6 +7,7 @@
 
 // does NOT work for randomized questions or matching.
 
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 
 if (!isset($teacherid) && !isset($tutorid)) {
@@ -74,24 +75,28 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
             continue;
         }
 
+		$qtype = $qsdata[$qsids[$questionId]]['qtype'];
+
         $qscore = array();
         $qatt = array();
-
         for ($pn = 0; $pn < count($scoredQuestion['tries']); $pn++) {
-            $scoredTryIndex = $scoredQuestion['scored_try'][$pn];
+            $scoredTryIndex = $scoredQuestion['scored_try'][$qtype=='conditional'?0:$pn];
             if (-1 == $scoredTryIndex) {
                 // No answer/attempt found.
                 $qscore[$pn] = 0;
                 $qatt[$pn] = '';
             } else {
                 $scoredTry = $scoredQuestion['tries'][$pn][$scoredTryIndex];
-                $qscore[$pn] = $scoredTry['raw'];
+                $qscore[$pn] = $scoredTry['raw'] ?? 0;
                 $qatt[$pn] = $scoredTry['stuans'];
             }
         }
 
         // Is this is a single part question?
-        if (1 == count($scoredQuestion['answeights'])) {
+		if ($qtype == 'conditional') {
+			$qscore = $qscore[0];
+			$qatt = implode('~', $qatt);
+		} else if ($qtype != 'multipart') {
             $qatt = $qatt[0];
             $qscore = $qscore[0];
         }
@@ -171,7 +176,7 @@ foreach ($itemarr as $k=>$q) {
 		'qsid' => array($k => $qsids[$q])
 	);
 	$a2->setState($state);
-    $res = $a2->displayQuestion($k, ['showhints'=>false, 'includeans'=>true]);
+    $res = $a2->displayQuestion($k, ['showhints'=>false, 'includeans'=>true, 'showallparts'=>true]);
 
 	echo '<div style="border:1px solid #000;padding:10px;margin-bottom:10px;clear:left;">';
 	echo '<p><span style="float:right">(Question ID '.Sanitize::onlyInt($qsids[$q]).')</span><b>'.Sanitize::encodeStringForDisplay($qsdata[$qsids[$q]]['description']).'</b></p>';
@@ -227,6 +232,9 @@ function disp($q,$qtype,$part=-1,$answer='',$questions=array()) {
 	if (array_key_exists($q, $qdata)) {
         foreach ($qdata[$q] as $varr) {
             if ($part > -1) {
+				if (!isset($varr[0][$part])) {
+					continue;
+				}
                 $v = $varr[0][$part];
             } else {
                 $v = $varr[0];

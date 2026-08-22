@@ -20,6 +20,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -160,7 +161,8 @@ if ($newQuestion !== $livepollStatus['curquestion'] ||
     'sig' => $livepollsig
   ));
 
-  $result = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/startq?' . $qs);
+  $port = $CFG['GEN']['livepollserverport'] ?? '3000';
+  $result = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/startq?' . $qs);
 
   if ($result !== 'success') {
     echo '{"error": "'.Sanitize::encodeStringForDisplay($r).'"}';
@@ -203,7 +205,8 @@ if ($newQuestion !== $livepollStatus['curquestion'] ||
     'now' => $now,
     'sig' => $livepollsig
   ));
-  $result = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/stopq?' . $qs);
+  $port = $CFG['GEN']['livepollserverport'] ?? '3000';
+  $result = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/stopq?' . $qs);
 
   if ($result !== 'success') {
     echo '{"error": "'.Sanitize::encodeStringForDisplay($r).'"}';

@@ -87,7 +87,8 @@ switch($_GET['action']) {
                 $fullopt = 'style="display:none;';
             }
 			$stm = $DBH->query("SELECT id,name FROM imas_courses WHERE istemplate > 0 AND (istemplate&4)=4 AND available<4 ORDER BY name");
-			if ($stm->rowCount()>0) {
+			$row = $stm->fetch(PDO::FETCH_NUM);
+			if ($row !== false) {
                 $doselfenroll = true;
                 if (isset($CFG['GEN']['COPPA'])) {
                     echo '<p class="fullopt" style="display:none">';
@@ -98,9 +99,9 @@ switch($_GET['action']) {
 				echo '<select id="courseselect" name="courseselect" onchange="courseselectupdate(this);">';
 				echo '<option value="0" selected="selected">',_('My teacher gave me a course ID (enter below)'),'</option>';
 				echo '<optgroup label="Self-study courses">';
-				while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+				do {
 					echo '<option value="'.Sanitize::encodeStringForDisplay($row[0]).'">'.Sanitize::encodeStringForDisplay($row[1]).'</option>';
-				}
+				} while ($row = $stm->fetch(PDO::FETCH_NUM));
 				echo '</optgroup>';
                 echo '</select></p>';
                 if (isset($CFG['GEN']['COPPA'])) {
@@ -229,6 +230,125 @@ switch($_GET['action']) {
                 $.post("actions.php", {action:"cleartrustedmfa"})
                  .done(function(msg) { if (msg == "OK") { $(el).replaceWith("'._('Cleared').'");}});
             }
+			// Passkey management
+            $(function() {
+				setupToggler2(document.getElementById("addPasskeyBtn"));
+                
+                $("#cancelPasskeyBtn").click(function() {
+                    $("#passkeyRegistrationForm").hide();
+                });
+                
+                $("#registerPasskeyBtn").click(function() {
+                    registerNewPasskey();
+                });
+                
+                $(".deletePasskeyBtn").click(function() {
+                    if (confirm("'._('Are you sure you want to delete this passkey?').'")) {
+                        var passkeyId = $(this).data("passkey-id");
+                        deletePasskey(passkeyId);
+                    }
+                });
+            });
+
+			function bta (o) {
+				let pre = "=?BINARY?B?", suf = "?=";
+				for (let k in o) {
+					if (typeof o[k] == "string") {
+						let s = o[k];
+						if (s.startsWith(pre) && s.endsWith(suf)) {
+						let raw = window.atob(s.slice(pre.length, -suf.length)),
+							u = new Uint8Array(raw.length);
+						for (let i = 0; i < raw.length; i++) u[i] = raw.charCodeAt(i);
+						o[k] = u.buffer;
+						}
+					} else {
+						bta(o[k]);
+					}
+				}
+			}
+            
+            async function registerNewPasskey() {
+                try {
+                    const pwField = document.getElementById("passkeyOldPw");
+                    const mfaField = document.getElementById("passkeyOldMfa");
+                    const reauth = { username: "register", password: pwField.value };
+                    if (mfaField) { reauth.mfatoken = mfaField.value; }
+
+                    // Get registration challenge (requires re-entering password/MFA)
+                    const options = await $.ajax({
+                        url: "actions.php?action=getPasskeyChallenge",
+                        method: "POST",
+                        contentType: "application/json",
+                        data: JSON.stringify(reauth),
+                        dataType: "json"
+                    });
+                    pwField.value = "";
+                    if (mfaField) { mfaField.value = ""; }
+                    if (options.success === false) {
+                        alert("'._('Passkey registration failed').':" + (options.error || "Unknown error"));
+                        return;
+                    }
+
+                    // 2. Convert base64 fields back to ArrayBuffers (the native WebAuthn format)
+					bta(options);
+
+					// 3. Prompt device biometric/PIN prompt
+					const credential = await navigator.credentials.create({ publicKey: options.publicKey });
+
+					// 4. Extract data from credential to send back to server
+					const registrationPayload = {
+						id: credential.id,
+						rawId: btoa(String.fromCharCode(...new Uint8Array(credential.rawId))),
+						type: credential.type,
+						response: {
+							clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(credential.response.clientDataJSON))),
+							attestationObject: btoa(String.fromCharCode(...new Uint8Array(credential.response.attestationObject)))
+						}
+					};
+                    
+                    // Send credential to server for registration
+                    const registerResult = await $.ajax({
+                        url: "actions.php?action=registerPasskey",
+                        method: "POST",
+                        contentType: "application/json",
+                        data: JSON.stringify(registrationPayload),
+                        dataType: "json"
+                    });
+
+                    if (registerResult.success) {
+                        alert("'._('Passkey registered successfully!').'");
+                        location.reload();
+                    } else {
+                        alert("'._('Passkey registration failed').':" + (registerResult.error || "Unknown error"));
+                    }
+                    
+                } catch (error) {
+                    console.error("Passkey registration error:", error);
+                    var errMsg = (error && error.responseJSON && error.responseJSON.error) ||
+                        (error && error.message) || (error && error.statusText) || error;
+                    alert("'._('Passkey registration failed').':" + errMsg);
+                }
+            }
+
+            function deletePasskey(passkeyId) {
+                $.post("actions.php", {
+                    action: "deletePasskey",
+                    passkeyId: passkeyId
+                })
+                .done(function(response) {
+                    var data = (typeof response === "string") ? JSON.parse(response) : response;
+                    if (data.success) {
+                        alert("'._('Passkey deleted successfully').'");
+                        location.reload();
+                    } else {
+                        alert("'._('Error deleting passkey').':" + data.error);
+                    }
+                })
+                .fail(function() {
+                    alert("'._('Error deleting passkey').'");
+                });
+            }
+            
         </script>';
 		if ($gb == '') {
 			echo "<div class=breadcrumb><a href=\"index.php\">Home</a> &gt; ",_('Modify User Profile'),"</div>\n";
@@ -294,6 +414,46 @@ switch($_GET['action']) {
                 echo '<a href="#" onclick="cleartrustedmfa(this)">'._('Clear trusted devices').'</a></span><br class=form>';
             }
         }
+
+		// Passkey Management
+        require_once __DIR__ . '/includes/passkey.php';
+        $rpId = parse_url($GLOBALS['basesiteurl'], PHP_URL_HOST);
+        $passkeyMgr = new PasskeyManager($rpId, isset($installname) ? $installname : 'IMathAS');
+        $userPasskeys = $passkeyMgr->getUserPasskeys($userid);
+        
+        echo '<span class=form><label for="passkeySection">'._('Passkeys').'</label></span>';
+        echo '<span class="formright">';
+        if (!empty($userPasskeys)) {
+            echo '<p>'._('You have registered ').' ' . count($userPasskeys) . ' passkey(s):</p>';
+            echo '<div style="margin-left: 20px;">';
+            foreach ($userPasskeys as $pk) {
+                $addedOn = tzdate('M j, Y', strtotime($pk['created_at']));
+                echo '<div style="margin-bottom: 10px;">';
+                echo '<span>' . _('Added') . ' ' . htmlspecialchars($addedOn) . '</span>';
+                echo ' <button type="button" class="deletePasskeyBtn" data-passkey-id="' . intval($pk['id']) . '" style="padding: 2px 8px;">Delete</button>';
+                echo '</div>';
+            }
+            echo '</div>';
+        } else {
+            echo '<p>'._('No passkeys registered yet.').'</p>';
+        }
+        echo '<button type="button" id="addPasskeyBtn" aria-controls="passkeyRegistrationForm" class="togglecontrol">Add Passkey</button>';
+        echo '</span>';
+        echo '<div id="passkeyRegistrationForm" style="display:none;">';
+        echo '<p>'._('A passkey lets you sign in securely without a password using your device. To add a passkey, follow these steps:').'</p>';
+        echo '<ol>';
+        echo '<li>'._('Confirm your identity below').'</li>';
+        echo '<li>'._('Click "Register Passkey"').'</li>';
+        echo '<li>'._('Your device will prompt you to set up a passkey').'</li>';
+        echo '<li>'._('Follow your device instructions (face/fingerprint scan, PIN, etc)').'</li>';
+        echo '</ol>';
+        echo '<label for="passkeyOldPw" class="form">'._('Enter current password:').'</label> <input type="password" id="passkeyOldPw" name="passkeyOldPw" size="20" autocomplete="current-password" /><br class=form>';
+        if (!empty($line['mfa'])) {
+            echo '<label for="passkeyOldMfa" class="form">'._('Enter 2-factor authentication code:').'</label> <input type="text" id="passkeyOldMfa" name="passkeyOldMfa" size="8" /><br class=form>';
+        }
+        echo '<span class=form></span><span class=formright><button type="button" id="registerPasskeyBtn">Register Passkey</button>';
+        echo ' <button type="button" id="cancelPasskeyBtn">Cancel</button></span><div class=clear></div>';
+        echo '</div><br class=form>';
 
 		echo "<span class=form><label for=\"email\">",_('Enter E-mail address:'),"</label></span>  <input class=\"form pii-email\" type=text size=60 id=email name=email autocomplete=\"email\" value=\"".Sanitize::emailAddress($line['email'])."\"><BR class=form>\n";
         
@@ -472,7 +632,8 @@ switch($_GET['action']) {
 		echo "<form id=\"pageform\" method=post action=\"actions.php?action=enroll$gb\">";
 		$doselfenroll = false;
         $stm = $DBH->query("SELECT id,name FROM imas_courses WHERE istemplate > 0 AND (istemplate&4)=4 AND available<4 ORDER BY name");
-        if ($stm->rowCount()>0) {
+        $row = $stm->fetch(PDO::FETCH_NUM);
+        if ($row !== false) {
             $stm2 = $DBH->prepare("SELECT jsondata FROM imas_users WHERE id=?");
             $stm2->execute(array($userid));
             $jsondata = json_decode($stm2->fetchColumn(0), true);
@@ -485,9 +646,9 @@ switch($_GET['action']) {
 			echo '<p><select id="courseselect" name="courseselect" onchange="courseselectupdate(this);">';
 			echo '<option value="0" selected="selected">',_('My teacher gave me a course ID (enter below)').'</option>';
 			echo '<optgroup label="Self-study courses">';
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			do {
 				echo '<option value="'.Sanitize::encodeStringForDisplay($row[0]).'">'.Sanitize::encodeStringForDisplay($row[1]).'</option>';
-			}
+			} while ($row = $stm->fetch(PDO::FETCH_NUM));
 			echo '</optgroup>';
 			echo '</select></p>';
 			echo '<div id="courseinfo">';
@@ -619,38 +780,41 @@ switch($_GET['action']) {
 		$allcourses = array();
 		$stm = $DBH->prepare("SELECT ic.id,ic.name FROM imas_courses AS ic JOIN imas_teachers AS it ON ic.id=it.courseid WHERE it.userid=:userid ORDER BY ic.name");
 		$stm->execute(array(':userid'=>$userid));
-		if ($stm->rowCount()>0) {
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
 			echo '<p><b>',_('Courses you\'re teaching'),':</b> ',_('Check'),': <a href="#" onclick="$(\'.teaching\').prop(\'checked\',true);return false;">',_('All'),'</a> <a href="#" onclick="$(\'.teaching\').prop(\'checked\',false);return false;">',_('None'),'</a>';
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			do {
 				$allcourses[] = $row[0];
 				echo '<br/><input type="checkbox" name="checked[]" class="teaching" value="'.Sanitize::encodeStringForDisplay($row[0]).'" id="c'.Sanitize::encodeStringForDisplay($row[0]).'"';
 				if (!in_array($row[0],$hidelist)) {echo 'checked="checked"';}
 				echo '/> <label for="c'.Sanitize::encodeStringForDisplay($row[0]).'">'.Sanitize::encodeStringForDisplay($row[1]).'</label>';
-			}
+			} while ($row = $stm->fetch(PDO::FETCH_NUM));
 			echo '</p>';
 		}
 		$stm = $DBH->prepare("SELECT ic.id,ic.name FROM imas_courses AS ic JOIN imas_tutors AS it ON ic.id=it.courseid WHERE it.userid=:userid ORDER BY ic.name");
 		$stm->execute(array(':userid'=>$userid));
-		if ($stm->rowCount()>0) {
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
 			echo '<p><b>',_('Courses you\'re tutoring'),':</b> ',_('Check'),': <a href="#" onclick="$(\'.tutoring\').prop(\'checked\',true);return false;">',_('All'),'</a> <a href="#" onclick="$(\'.tutoring\').prop(\'checked\',false);return false;">',_('None'),'</a>';
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			do {
 				$allcourses[] = Sanitize::encodeStringForDisplay($row[0]);
 				echo '<br/><input type="checkbox" name="checked[]" class="tutoring" value="'.Sanitize::encodeStringForDisplay($row[0]).'" id="c'.Sanitize::encodeStringForDisplay($row[0]).'"';
 				if (!in_array($row[0],$hidelist)) {echo 'checked="checked"';}
 				echo '/> <label for="c'.Sanitize::encodeStringForDisplay($row[0]).'">'.Sanitize::encodeStringForDisplay($row[1]).'</label>';
-			}
+			} while ($row = $stm->fetch(PDO::FETCH_NUM));
 			echo '</p>';
 		}
 		$stm = $DBH->prepare("SELECT ic.id,ic.name FROM imas_courses AS ic JOIN imas_students AS it ON ic.id=it.courseid WHERE it.userid=:userid ORDER BY ic.name");
 		$stm->execute(array(':userid'=>$userid));
-		if ($stm->rowCount()>0) {
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
 			echo '<p><b>',_('Courses you\'re taking'),':</b> ',_('Check'),': <a href="#" onclick="$(\'.taking\').prop(\'checked\',true);return false;">',_('All'),'</a> <a href="#" onclick="$(\'.taking\').prop(\'checked\',false);return false;">',_('None'),'</a>';
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			do {
 				$allcourses[] = $row[0];
 				echo '<br/><input type="checkbox" name="checked[]" class="taking" value="'.Sanitize::encodeStringForDisplay($row[0]).'" id="c'.Sanitize::encodeStringForDisplay($row[0]).'"';
 				if (!in_array($row[0],$hidelist)) {echo 'checked="checked"';}
 				echo '/> <label for="c'.Sanitize::encodeStringForDisplay($row[0]).'">'.Sanitize::encodeStringForDisplay($row[1]).'</label>';
-			}
+			} while ($row = $stm->fetch(PDO::FETCH_NUM));
 			echo '</p>';
 		}
 		echo '<input type="hidden" name="allcourses" value="'.Sanitize::encodeStringForDisplay(implode(',',$allcourses)).'"/>';

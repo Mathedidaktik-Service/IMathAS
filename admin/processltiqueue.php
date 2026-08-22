@@ -127,8 +127,10 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 						'ver' => 'LTI1.3',
 						'action' => 'update',
 						'ltiuserid' => $ltiuserid,
+						'hash' => $row['hash'],
 						'platformid' => $platformid,
-						'grade' => max(0, $row['grade']),
+						'grade' => $row['grade'],
+						'ptsposs' => $row['ptsposs'],
                         'isstu' => $row['isstu'],
                         'addedon' => $row['addedon']
 					),
@@ -139,6 +141,8 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 						'lasttry' => ($row['failures']>=6)
 					)
 				);
+			} else if ($updater1p3->token_giveup($platformid)) {
+				giveupQueueItem($row['hash']);
 			} else {
 				$updater1p3->update_sendon($row['hash'], $platformid);
 			}
@@ -174,7 +178,11 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
             $secret = '';
             if (strlen($lti_sourcedid)>1 && strlen($ltiurl)>1 && strlen($ltikey)>1) {
                 debuglog('queing 1.1 request for '.$row['hash']);
-                $grade = min(1, max(0, $row['grade']));
+				if ($row['ptsposs'] > 0) {
+					$grade = $row['grade'] / $row['ptsposs'];
+				} else {
+					$grade = 0;
+				}
                 $RCX->addRequest(
                     $ltiurl,  //url to request
                     array( 		//post data; will get transformed before send
@@ -227,8 +235,10 @@ if (count($round2)>0 &&  $timeused < 40) {
 						'ver' => 'LTI1.3',
 						'action' => 'update',
 						'ltiuserid' => $ltiuserid,
+						'hash' => $row['hash'],
 						'platformid' => $platformid,
-						'grade' => max(0, $row['grade']),
+						'grade' => $row['grade'],
+						'ptsposs' => $row['ptsposs'],
                         'isstu' => $row['isstu'],
                         'addedon' => $row['addedon']
 					),
@@ -239,6 +249,8 @@ if (count($round2)>0 &&  $timeused < 40) {
 						'lasttry' => ($row['failures']>=6)
 					)
 				);
+			} else if ($updater1p3->token_giveup($platformid)) {
+				giveupQueueItem($row['hash']);
 			} else {
 				$updater1p3->update_sendon($row['hash'], $platformid);
 			}
@@ -285,7 +297,7 @@ function LTIqueuePostdataCallback($data) {
                 $updater1p3->token_valid($data['platformid'])
             ) { // double check we have a valid token
 				$token = $updater1p3->get_access_token($data['platformid']);
-				return $updater1p3->get_update_body($token, $data['grade'], $data['ltiuserid'], $data['isstu'], $data['addedon']);
+				return $updater1p3->get_update_body($token, $data['grade'], $data['ptsposs'], $data['ltiuserid'], $data['hash'], $data['isstu'], $data['addedon']);
 			} else {
 				return false;
 			}
@@ -300,15 +312,17 @@ function LTIqueuePostdataCallback($data) {
 		$keyparts = explode('_',$data['key']);
 		$stm = $DBH->prepare("SELECT ltisecret FROM imas_courses WHERE id=:id");
 		$stm->execute(array(':id'=>$keyparts[1]));
-		if ($stm->rowCount()>0) {
-			$secret = $stm->fetchColumn(0);
+		$fetchedsecret = $stm->fetchColumn(0);
+		if ($fetchedsecret !== false) {
+			$secret = $fetchedsecret;
 			$LTIsecrets[$data['key']] = $secret;
 		}
 	} else {
 		$stm = $DBH->prepare("SELECT password FROM imas_users WHERE SID=:SID AND (rights=11 OR rights=76 OR rights=77)");
 		$stm->execute(array(':SID'=>$data['key']));
-		if ($stm->rowCount()>0) {
-				$secret = $stm->fetchColumn(0);
+		$fetchedsecret = $stm->fetchColumn(0);
+		if ($fetchedsecret !== false) {
+				$secret = $fetchedsecret;
 				$LTIsecrets[$data['key']] = $secret;
 		}
 	}
@@ -334,7 +348,7 @@ function LTIqueueCallback($response, $url, $request_info, $user_data, $time) {
 			// was a token request
 			if ($response === false) {
 				// record failure. in round 2 token will be read as not valid
-				$updater1p3->token_request_failure($user_data['platformid'], $request_info['response_text'], $request_info['error'] . ' code ' . $request_info['http_code']);
+				$updater1p3->token_request_failure($user_data['platformid'], $request_info['response_text'], ($request_info['error'] ?? '(no err)') . ' code ' . $request_info['http_code']);
 				debuglog('token request failure t1 '.$user_data['platformid']);
                 return;
 			}
@@ -344,7 +358,7 @@ function LTIqueueCallback($response, $url, $request_info, $user_data, $time) {
 				debuglog('got token for '.$user_data['platformid']);
 			} else {
                 // record failure. in round 2 token will be read as not valid
-				$updater1p3->token_request_failure($user_data['platformid'], $response . $request_info['response_text'], $request_info['error'] . ' code ' . $request_info['http_code']);
+				$updater1p3->token_request_failure($user_data['platformid'], $response . $request_info['response_text'], ($request_info['error'] ?? '(no err)') . ' code ' . $request_info['http_code']);
 				debuglog('token request failure t2 '.$response);
 			}
 			return; // doesn't effect ltiqueue, so return now
@@ -426,4 +440,10 @@ function deleteInvalid($hash) {
 	global $DBH;
 	$delfromqueue = $DBH->prepare("DELETE FROM imas_ltiqueue WHERE hash=?");
     $delfromqueue->execute([$hash]);
+}
+
+function giveupQueueItem($hash) {
+	global $DBH;
+	$stm = $DBH->prepare("UPDATE imas_ltiqueue SET failures=7 WHERE hash=?");
+    $stm->execute([$hash]);
 }

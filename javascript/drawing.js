@@ -39,6 +39,7 @@
 	5.2:  ray (no arrow)
 	5.3:  line segment
 	5.4:  vector
+	5.9:  rectangle
 	6: parabola
 	6.1: horiz parabola
 	6.2: half parabola
@@ -59,6 +60,7 @@
 	9: cosine
 	9.1: sine
 	9.2: tangent
+	9.3: secant
    ineqtypes
    	10: linear >= or <=
    	10.2: linear < or >
@@ -102,11 +104,11 @@ var clickmightbenewcurve = false;
 var hasTouchTimer = null;
 var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 var tpModeN = {
-	"5": 2, "5.1": 2, "5.2": 2, "5.3": 2, "5.4": 2,
+	"5": 2, "5.1": 2, "5.2": 2, "5.3": 2, "5.4": 2, "5.9": 2,
 	"6": 2, "6.1": 2, "6.2": 2, "6.3": 2, "6.5": 2, "6.6": 2, "6.7": 3,
 	"7": 2, "7.2": 2, "7.4": 2, "7.5": 2,
 	"8": 2, "8.2": 2, "8.3": 2, "8.4": 2, "8.5": 3, "8.6": 3,
-	"9": 2, "9.1": 2, "9.2": 3,
+	"9": 2, "9.1": 2, "9.2": 3, "9.3": 2,
 	"10": 3, "10.2": 3, "10.3": 3, "10.4": 3};
 var tpHasAsymp = { "7.4": 1, "7.5": 1, "8.2": 1, "8.5": 1, "8.6": 1};
 
@@ -273,7 +275,9 @@ function addA11yTarget(canvdata, thisdrawla, imgpath) {
 				{"mode":9.1, "descr":_("Sine"), inN: 2, "input":_("Enter a point at the start of a phase, then a point a quarter phase further")}
 			],
 			"tan": [{"mode":9.2, "descr":_("Tangent"), inN: 3, "input":_("Enter the inflection point of the tangent, then a point on a vertical asymptote, then a point on the graph")}],
+			"sec": [{"mode":9.3, "descr":_("Secant"), inN: 2, "input":_("Enter a point at a peak of the secant and a point at the trough of the next segment")}],
 			"vector": [{"mode":5.4, "descr":_("Vector"), inN: 2, "input":_("Enter the starting and ending point of the vector")}],
+			"rect": [{"mode":5.9, "descr":_("Rectangle"), inN: 2, "input":_("Enter two opposite corners of the rectangle")}],
 		},
 		"basic": {
 			"line": [{"mode":0, "descr":_("Lines"), inN: "list", "input":_("Enter a list of points to connect with lines")}],
@@ -937,7 +941,7 @@ function drawTarget(x,y,skipencode) {
 	}
 	ctx.strokeStyle = "rgb(0,0,255)";
 	for (var i=0;i<tplines[curTarget].length; i++) {
-		if (tptypes[curTarget][i]>=5 && tptypes[curTarget][i]<6) {//if a tpline
+		if (tptypes[curTarget][i]>=5 && tptypes[curTarget][i]<5.5) {//if a tpline
 			var slope = null;
 			var x2 = null;
 			var y2 = null; var u, uperp;
@@ -1007,6 +1011,29 @@ function drawTarget(x,y,skipencode) {
 						}
 					}
 				}
+			}
+		} else if (tptypes[curTarget][i]==5.9) { //if a tp rectangle
+			var y2 = null;
+			var x2 = null;
+			if (tplines[curTarget][i].length==2) {
+				x2 = tplines[curTarget][i][1][0];
+				y2 = tplines[curTarget][i][1][1];
+			} else if (curTPcurve==i && x!=null && tplines[curTarget][i].length==1) {
+				x2 = x;
+				y2 = y;
+			}
+			if (x2 != null) {
+				var x1 = tplines[curTarget][i][0][0];
+				var y1 = tplines[curTarget][i][0][1];
+				ctx.moveTo(x1,y1);
+				ctx.lineTo(x2,y1);
+				ctx.lineTo(x2,y2);
+				ctx.lineTo(x1,y2);
+				ctx.closePath();
+				ctx.save();
+				ctx.fillStyle = "rgba(0,0,255,0.2)"; // 20% opacity fill matching the rgb(0,0,255) stroke used for tplines
+				ctx.fill();
+				ctx.restore();
 			}
 		} else if (tptypes[curTarget][i]==6 || tptypes[curTarget][i]==6.1 || tptypes[curTarget][i]==6.2) {//if a tp parabola
 			var y2 = null;
@@ -1764,6 +1791,70 @@ function drawTarget(x,y,skipencode) {
 							} else {
 								ctx.lineTo(curx,cury);
 							}
+						}
+					}
+				}
+			}
+		} else if (tptypes[curTarget][i]==9.3 ) {//if a tp sec/csc
+			var y2 = null;
+			var x2 = null;
+			if (tplines[curTarget][i].length==2) {
+				x2 = tplines[curTarget][i][1][0];
+				y2 = tplines[curTarget][i][1][1];
+			} else if (curTPcurve==i && x!=null && tplines[curTarget][i].length==1) {
+				x2 = x;
+				y2 = y;
+			}
+			if (x2 != null && x2!=tplines[curTarget][i][0][0] && y2!=tplines[curTarget][i][0][1]) {
+				var amp = -1*Math.abs(y2-tplines[curTarget][i][0][1])/2;
+				var mid = (y2+tplines[curTarget][i][0][1])/2;
+				var period = Math.abs(x2-tplines[curTarget][i][0][0]);
+				var stretch = Math.PI/period;
+				var horizs = (y2 < tplines[curTarget][i][0][1])?x2:tplines[curTarget][i][0][0];
+
+				ctx.strokeStyle = asymcolor;
+				var n=0;
+				var asymbase = (x2+tplines[curTarget][i][0][0])/2;
+				var asymp = [];
+				while (asymbase + period*n < targets[curTarget].imgwidth) {
+					// draw asymptote
+					ctx.dashedLine(asymbase + period*n,0,asymbase + period*n,targets[curTarget].imgheight);
+					asymp.push(asymbase + period*n);
+					n++;
+				}
+				n=-1;
+				while (asymbase + period*n > 0) {
+					// draw asymptote
+					ctx.dashedLine(asymbase + period*n,0,asymbase + period*n,targets[curTarget].imgheight);
+					asymp.push(asymbase + period*n);
+					n--;
+				}
+				ctx.beginPath();
+				ctx.strokeStyle = "rgb(0,0,255)";
+				asymp.push(targets[curTarget].imgwidth+1);
+				asymp.sort(function(a,b) { return a - b; });
+
+				var leftstart=0, rightend, cury;
+				for (var cursec=0;cursec<asymp.length;cursec++) {
+					rightend = asymp[cursec];
+					if (cursec > 0) {
+						leftstart = asymp[cursec - 1] + 1;
+					}
+					for (var curx=leftstart;curx < rightend;curx += 1) {
+						cury = amp/Math.cos(stretch*(curx - horizs)) + mid;
+						if ((cursec > 0 && curx == leftstart) || 
+							(cursec < asymp.length - 1 && rightend-curx <= 1)
+						) {
+							if (cury-mid > amp && cury < targets[curTarget].imgheight) {
+								cury = targets[curTarget].imgheight;
+							} else if (cury-mid < amp && cury > 0) {
+								cury = 0;
+							}
+						}
+						if (curx==leftstart) {
+							ctx.moveTo(curx,cury);
+						} else {
+							ctx.lineTo(curx,cury);
 						}
 					}
 				}

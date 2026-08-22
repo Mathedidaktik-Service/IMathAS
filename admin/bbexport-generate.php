@@ -13,6 +13,11 @@ $loadgraphfilter = 1;
 require_once "../includes/filehandler.php";
 require_once "../filter/filter.php";
 require_once "bbexport-templates.php";
+require_once "../includes/courselinkinc.php";
+
+if (!empty($CFG['GEN']['mathimgurlexport'])) {
+	$mathimgurl = $CFG['GEN']['mathimgurlexport'];
+}
 if (substr($mathimgurl,0,4) !== 'http') {
     // need to make an absolute url
     if (strlen($imasroot) > 0) { 
@@ -121,6 +126,7 @@ if (substr($mathimgurl,0,4)!='http' && isset($GLOBALS['basesiteurl'])) {
 	$mathimgurl = substr($GLOBALS['basesiteurl'],0,-1*strlen($imasroot)). $mathimgurl;
 }
 function filtercapture($str) {
+	$str = stripCourseLinks($str);
 	$str = forcefiltermath($str);
 	$str = forcefiltergraphnofile($str);
 	return $str;
@@ -437,12 +443,14 @@ function getorg($it,$parent,&$res,$ind, $parentid) {
 
 				$stm = $DBH->prepare("SELECT revision FROM imas_wiki_revisions WHERE wikiid=:wikiid AND stugroupid=0 ORDER BY id DESC LIMIT 1");
 				$stm->execute(array(':wikiid'=>$iteminfo[$item][1]));
-				if ($stm->rowCount()>0) {
-					$text = $stm->fetchColumn(0);
+				$text = $stm->fetchColumn(0);
+				if ($text !== false) {
 					if (strlen($text)>6 && substr($text,0,6)=='**wver') {
 						$wikiver = substr($text,6,strpos($text,'**',6)-6);
 						$text = substr($text,strpos($text,'**',6)+2);
 					}
+				} else {
+					$text = '';
 				}
 
 				createbbitem($resid, $parentid, 'basicitem', $row[0], array(

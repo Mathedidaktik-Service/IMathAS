@@ -10,28 +10,30 @@ require_once __DIR__.'/../lti/LTI_Grade_Update.php';
  * @param string  $key       a unique key for the user/item.
  *                        Assessments use "assessmentid-userid", so other
  *                        types should use something different. Max 32 char.
- * @param float  $grade     The grade to send, between 0 and 1
+ * @param float  $grade     The grade to send, either between 0 and 1, or value out of ptsposs
+ * @param int	 $ptsposs	Points possible
  * @param boolean $sendnow   true to send in the next update, false (default)
  *                          to send after the $CFG-set queuedelay.
  * @param boolean $isstu    whether it was a student initiated grade change
  */
-function addToLTIQueue($sourcedid, $key, $grade, $sendnow=false, $isstu=true) {
+function addToLTIQueue($sourcedid, $key, $grade, $ptsposs = 1, $sendnow=false, $isstu=true, $addtime=null) {
 	global $DBH, $CFG;
 
 	$LTIdelay = 60*(isset($CFG['LTI']['queuedelay'])?$CFG['LTI']['queuedelay']:5);
 
-	$query = 'INSERT INTO imas_ltiqueue (hash, sourcedid, grade, failures, sendon, isstu, addedon) ';
-	$query .= 'VALUES (:hash, :sourcedid, :grade, 0, :sendon, :isstu, :addedon) ON DUPLICATE KEY UPDATE ';
-	$query .= 'grade=VALUES(grade),sendon=VALUES(sendon),sourcedid=VALUES(sourcedid),failures=0,isstu=GREATEST(isstu,VALUES(isstu)) ';
+	$query = 'INSERT INTO imas_ltiqueue (hash, sourcedid, grade, ptsposs, failures, sendon, isstu, addedon) ';
+	$query .= 'VALUES (:hash, :sourcedid, :grade, :ptsposs, 0, :sendon, :isstu, :addedon) ON DUPLICATE KEY UPDATE ';
+	$query .= 'grade=VALUES(grade),ptsposs=VALUES(ptsposs),sendon=VALUES(sendon),sourcedid=VALUES(sourcedid),failures=0,isstu=GREATEST(isstu,VALUES(isstu)) ';
 
 	$stm = $DBH->prepare($query);
 	$stm->execute(array(
 		':hash' => $key,
 		':sourcedid' => $sourcedid,
 		':grade' => $grade,
+		':ptsposs' => $ptsposs,
 		':sendon' => (time() + ($sendnow?0:$LTIdelay)),
         ':isstu' => $isstu ? 1 : 0,
-        ':addedon' => time()
+        ':addedon' => $addtime ?? time()
 	));
 
 	return ($stm->rowCount()>0);
@@ -39,7 +41,7 @@ function addToLTIQueue($sourcedid, $key, $grade, $sendnow=false, $isstu=true) {
 
 $aidtotalpossible = array();
 //use this if we don't know the total possible
-function calcandupdateLTIgrade($sourcedid,$aid,$uid,$scores,$sendnow=false,$aidposs=-1,$isstu=true) {
+function calcandupdateLTIgrade($sourcedid,$aid,$uid,$scores,$sendnow=false,$aidposs=-1,$isstu=true,$addtime=null) {
 	global $DBH, $aidtotalpossible;
   if ($aidposs == -1) {
     if (isset($aidtotalpossible[$aid])) {
@@ -68,17 +70,13 @@ function calcandupdateLTIgrade($sourcedid,$aid,$uid,$scores,$sendnow=false,$aidp
     // new assesses
     $total = $scores;
   }
-    if ($aidposs > 0) {
-	    $grade = max(0,$total/$aidposs);
-    } else {
-        $grade = 0;
-    }
-	$grade = number_format($grade,8);
-	return updateLTIgrade('update',$sourcedid,$aid,$uid,$grade,$allans||$sendnow,$isstu);
+
+	$grade = max(0,$total);
+	return updateLTIgrade('update',$sourcedid,$aid,$uid,$grade,$aidposs,$allans||$sendnow,$isstu,$addtime);
 }
 
 //use this if we know the grade, or want to delete
-function updateLTIgrade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false,$isstu=true) {
+function updateLTIgrade($action,$sourcedid,$aid,$uid,$grade=0,$aidposs=1,$sendnow=false,$isstu=true,$addtime=null) {
 	global $CFG;
 
     if (empty($uid) || empty($sourcedid) || is_array($sourcedid)) {
@@ -91,12 +89,12 @@ function updateLTIgrade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false,$is
 		} else {
 			$logFile = fopen($logfilename, "a+");
 		}
-		fwrite($logFile, date("j-m-y,H:i:s",time()) . ",$aid,$uid,$grade,$sourcedid\n");
+		fwrite($logFile, date("j-m-y,H:i:s",time()) . ",$aid,$uid,$grade,$aidposs,$sourcedid\n");
 		fclose($logFile);
 	}
 	//if we're using the LTI message queue, and it's an update, queue it
 	if (!empty($CFG['LTI']['usequeue']) && $action=='update') {
-		return addToLTIQueue($sourcedid, $aid.'-'.$uid, $grade, $sendnow, $isstu);
+		return addToLTIQueue($sourcedid, $aid.'-'.$uid, $grade, $aidposs, $sendnow, $isstu, $addtime);
 	}
 
   $sourcedidparts = explode(':|:',$sourcedid);
@@ -109,16 +107,25 @@ function updateLTIgrade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false,$is
     return $updater->send_update($token,
       $ltiparts[2], // lineitemurl
       $action == 'delete' ? 0 : $grade, // score
+	  $aidposs, // possible
       $ltiparts[1], // ltiuserid
+	  $aid.'-'.$uid, // local aid-userid
       $action == 'delete' ? 'Initialized' : 'Submitted', // activityProgress
       $action == 'delete' ? 'NotReady' : 'FullyGraded', // gradingProgress
-      $isstu
+      $isstu,
+	  $addtime
     );
   } else {
+	if ($aidposs > 0) {
+		$grade = $grade / $aidposs;
+	} else {
+		$grade = 0;
+	}
     updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade,$sendnow);
   }
 }
 
+// for 1.1, grade is a number 0-1
 function updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false) {
   global $DBH,$testsettings,$cid,$CFG,$userid;
 
@@ -135,8 +142,9 @@ function updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false)
 				} else {
 					$stm = $DBH->prepare("SELECT ltisecret FROM imas_assessments WHERE id=:id");
 					$stm->execute(array(':id'=>$aid));
-					if ($stm->rowCount()>0) {
-						$secret = $stm->fetchColumn(0);
+					$row = $stm->fetch(PDO::FETCH_NUM);
+					if ($row !== false) {
+						$secret = $row[0];
 						$_SESSION[$ltikey.'-'.$aid.'-secret'] = $secret;
 					} else {
 						$secret = '';
@@ -153,8 +161,9 @@ function updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false)
 				$keyparts = explode('_',$ltikey);
 				$stm = $DBH->prepare("SELECT ltisecret FROM imas_courses WHERE id=:id");
 				$stm->execute(array(':id'=>$keyparts[1]));
-				if ($stm->rowCount()>0) {
-					$secret = $stm->fetchColumn(0);
+				$row = $stm->fetch(PDO::FETCH_NUM);
+				if ($row !== false) {
+					$secret = $row[0];
 					$_SESSION[$ltikey.'-'.$aid.'-secret'] = $secret;
 				} else {
 					$secret = '';
@@ -167,8 +176,9 @@ function updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false)
 					$stm = $DBH->prepare("SELECT password FROM imas_users WHERE SID=:SID AND (rights=11 OR rights=76 OR rights=77)");
 					$stm->execute(array(':SID'=>$ltikey));
 				}
-				if ($stm->rowCount()>0) {
-					$secret = $stm->fetchColumn(0);
+				$row = $stm->fetch(PDO::FETCH_NUM);
+				if ($row !== false) {
+					$secret = $row[0];
 					$_SESSION[$ltikey.'-'.$aid.'-secret'] = $secret;
 				} else {
 					$secret = '';
@@ -177,7 +187,6 @@ function updateLTI1p1grade($action,$sourcedid,$aid,$uid,$grade=0,$sendnow=false)
 		}
 		if ($secret != '') {
 			if ($action=='update') {
-				$grade = min(1, max(0,$grade));
 				return sendLTIOutcome('update',$ltikey,$secret,$ltiurl,$lti_sourcedid,$grade);
 			} else if ($action=='delete') {
 				return sendLTIOutcome('delete',$ltikey,$secret,$ltiurl,$lti_sourcedid);
@@ -392,7 +401,11 @@ function sendXmlOverPost($url, $xml, $header) {
 
   // Send to remote and return data to caller.
   $result = curl_exec($ch);
-  curl_close($ch);
+  if (PHP_VERSION_ID >= 80000) {
+     unset($ch);
+  } else {
+	curl_close($ch);
+  };
   return $result;
 }
 
@@ -446,11 +459,15 @@ function newXMLoverPost($url, $request, $requestHeaders, $method = 'POST') {
 				echo htmlentities(curl_error());
 			}*/
 		} else {
-      if (curl_errno($ch)) {
-        $resp = curl_error($ch);
-      }
-    }
-		curl_close($ch);
+			if (curl_errno($ch)) {
+				$resp = curl_error($ch);
+			}
+		}
+		if (PHP_VERSION_ID >= 80000) {
+			unset($ch);
+		} else {
+			curl_close($ch);
+		};
 	} else {
 		// Try using fopen if curl was not available
 		$opts = array('method' => $method,
@@ -496,8 +513,14 @@ if (!function_exists("getpts")) {
 	}
 }
 
+function normalizeGrade($grade) {
+	$grade = min(max(0,$grade), 1);
+	return number_format($grade,8);
+}
 
 function sendLTIOutcome($action,$key,$secret,$url,$sourcedid,$grade=0,$checkResponse=false) {
+
+	$grade = normalizeGrade($grade);	
 
 	$method="POST";
 	$content_type = "application/xml";
@@ -574,6 +597,9 @@ function sendLTIOutcome($action,$key,$secret,$url,$sourcedid,$grade=0,$checkResp
 
 
 function prepLTIOutcomePost($action,$key,$secret,$url,$sourcedid,$grade=0) {
+
+	$grade = normalizeGrade($grade);
+
 	$body = '<?xml version = "1.0" encoding = "UTF-8"?>
 	<imsx_POXEnvelopeRequest xmlns = "http://www.imsglobal.org/services/ltiv1p1/xsd/imsoms_v1p0">
 		<imsx_POXHeader>

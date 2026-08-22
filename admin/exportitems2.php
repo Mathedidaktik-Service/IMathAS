@@ -15,6 +15,7 @@ require_once "../init.php";
 require_once "../includes/filehandler.php";
 require_once "../includes/copyiteminc.php";
 require_once "../includes/loaditemshowdata.php";
+require_once "../includes/reqscorefuncs.php";
 require_once "itemexportfields.php";
 
 mb_substitute_character("none");
@@ -33,7 +34,9 @@ function exportcopysub($items,$parent,&$addtoarr) {
 			if (array_search($parent.'-'.($k+1),$checked)!==FALSE) { //copy block
 				$newblock = array();
 				foreach ($db_fields['block'] as $field) {
-					$newblock[$field] = $item[$field];
+					if (isset($item[$field])) {
+						$newblock[$field] = $item[$field];
+					}
 				}
 				$newblock['items'] = array();
 				exportcopysub($item['items'],$parent.'-'.($k+1),$newblock['items']);
@@ -85,7 +88,7 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 	$body = "You need to log in as a teacher to access this page";
 } elseif (isset($_POST['export'])) { //STEP 2 DATA PROCESSING, OUTPUT FILE HERE
 
-	$checked = $_POST['checked'];
+	$checked = $_POST['checked'] ?? [];
 	$output = array();
 	$output['sourceinstall'] = $installname;
 
@@ -174,7 +177,7 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 				}
 				$line['fileorder'] = $newfileorder;
 			}
-			$line['text'] = makeFilestoreAbs($line['text']);
+			$line['text'] = stripCourseLinks(makeFilestoreAbs($line['text']));
 			$output['items'][$output_item_id] = array('type'=>'InlineText', 'data'=>$line);
 		}
 	}
@@ -204,9 +207,9 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 					$line['text'] = 'exttool:'.implode('~~',$parts);
 				}
 			} else {
-				$line['text'] = makeFilestoreAbs($line['text']);
+				$line['text'] = stripCourseLinks(makeFilestoreAbs($line['text']));
 			}
-			$line['summary'] = makeFilestoreAbs($line['summary']);
+			$line['summary'] = stripCourseLinks(makeFilestoreAbs($line['summary']));
 			$output['items'][$output_item_id] = array('type'=>'LinkedText', 'data'=>$line, 'rehostfile'=>$rehostfile);
 		}
 	}
@@ -228,9 +231,9 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 			} else {
 				$line['gbcategory'] = 0;
 			}
-			$line['description'] = makeFilestoreAbs($line['description']);
-			$line['postinstr'] = makeFilestoreAbs($line['postinstr']);
-			$line['replyinstr'] = makeFilestoreAbs($line['replyinstr']);
+			$line['description'] = stripCourseLinks(makeFilestoreAbs($line['description']));
+			$line['postinstr'] = stripCourseLinks(makeFilestoreAbs($line['postinstr']));
+			$line['replyinstr'] = stripCourseLinks(makeFilestoreAbs($line['replyinstr']));
 			$output['items'][$output_item_id] = array('type'=>'Forum', 'data'=>$line);
 		}
 
@@ -248,7 +251,7 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 					}
 					$line['files'] = $files;
 				}
-				$line['message'] = makeFilestoreAbs($line['message']);
+				$line['message'] = stripCourseLinks(makeFilestoreAbs($line['message']));
 				//remap forum id
 				$line['forumid'] = $forummap[$line['forumid']];
 				$output['stickyposts'][] = $line;
@@ -267,6 +270,7 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 		while ($line = $stm->fetch(PDO::FETCH_ASSOC)) {
 			$output_item_id = $itemtypebackref['Wiki'][$line['id']];
 			unset($line['id']);
+			$line['description'] = stripCourseLinks($line['description']);
 			$output['items'][$output_item_id] = array('type'=>'Wiki', 'data'=>$line);
 		}
 	}
@@ -357,6 +361,19 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 			//unserialize endmsg
 			if ($line['endmsg']!='') {
 				$line['endmsg'] = unserialize($line['endmsg']);
+				if (is_array($line['endmsg'])) {
+					if (!empty($line['endmsg']['def'])) {
+						$line['endmsg']['def'] = stripCourseLinks($line['endmsg']['def']);
+					}
+					if (!empty($line['endmsg']['commonmsg'])) {
+						$line['endmsg']['commonmsg'] = stripCourseLinks($line['endmsg']['commonmsg']);
+					}
+					if (!empty($line['endmsg']['msgs']) && is_array($line['endmsg']['msgs'])) {
+						foreach ($line['endmsg']['msgs'] as $sc=>$msg) {
+							$line['endmsg']['msgs'][$sc] = stripCourseLinks($msg);
+						}
+					}
+				}
 			}
 			//change itemorder into an array and remap question id
 			if ($line['itemorder']=='') {
@@ -394,20 +411,21 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 					}
 				}
 			}
-			$line['summary'] = makeFilestoreAbs($line['summary']);
-			$line['intro'] = makeFilestoreAbs($line['intro']);
+			$line['summary'] = stripCourseLinks(makeFilestoreAbs($line['summary']));
+			// intro is sometimes a JSON-encoded array of per-question intro
+			// sections rather than plain HTML -- see transformAssessmentIntro()
+			$line['intro'] = transformAssessmentIntro($line['intro'], function ($html) {
+				return stripCourseLinks(makeFilestoreAbs($html));
+			});
+			$line['deffeedbacktext'] = stripCourseLinks($line['deffeedbacktext']);
 			$line['itemorder'] = $neworder;
 			$output['items'][$output_item_id] = array('type'=>'Assessment', 'data'=>$line);
 		}
-		//remap reqscoreaid
+		//remap reqscore aid's
 		foreach ($assessmap as $sourceid=>$outputid) {
-			if ($output['items'][$outputid]['data']['reqscoreaid']>0) {
-				if (isset($assessmap[$output['items'][$outputid]['data']['reqscoreaid']])) {
-					$output['items'][$outputid]['data']['reqscoreaid'] = $assessmap[$output['items'][$outputid]['data']['reqscoreaid']];
-				} else {
-					//unset
-					$output['items'][$outputid]['data']['reqscoreaid'] = 0;
-				}
+			if ($output['items'][$outputid]['data']['reqscorejson']!='') {
+				$newjson = remapReqScore(json_decode($output['items'][$outputid]['data']['reqscorejson'], true), $assessmap, false);
+				$output['items'][$outputid]['data']['reqscorejson'] = empty($newjson)?'':json_encode($newjson);
 			}
 		}
 	}
@@ -440,6 +458,8 @@ if (!(isset($teacherid))) {   //NO PERMISSIONS
 				}
 			}
 			$line['itemids'] = $itemids;
+			$line['summary'] = stripCourseLinks($line['summary']);
+			$line['itemdescr'] = stripCourseLinks($line['itemdescr']);
 			$output['items'][$output_item_id] = array('type'=>'Drill', 'data'=>$line);
 		}
 	}

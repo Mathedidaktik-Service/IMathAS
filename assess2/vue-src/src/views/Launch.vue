@@ -3,6 +3,13 @@
     <div style="flex-grow: 1">
       <h1>{{ aInfo.name }}</h1>
 
+      <div v-if="!aInfo.srready" class="sr-only">
+        {{ $t('launch-a11ywarn') }}
+        <button @click="showUserPrefs">
+          {{ $t('lti-userprefs') }}
+        </button>
+      </div>
+
       <div class="med-below" v-html="aInfo.summary" ref="summary"></div>
 
       <settings-list />
@@ -41,6 +48,13 @@
           {{ timeLimitExt }}
         </span>
         <span v-else>
+          <span v-if = "hasRetakes">
+            {{  $t('setlist-submitretake') }}
+          </span>
+          <span v-else>
+            {{  $t('setlist-submitnote') }}
+          </span>
+          <br/>
           <button
             type="button"
             class="primary"
@@ -242,6 +256,11 @@ export default {
     showTutorLinks () {
       return this.aInfo.hasOwnProperty('tutor_gblinks');
     },
+    hasRetakes () {
+      return (this.aInfo.submitby === 'by_assessment' &&
+        this.aInfo.prev_attempts.length + (this.aInfo.has_active_attempt ? 1 : 0) < this.aInfo.allowed_attempts
+      );
+    },
     showGbLink () {
       return (this.aInfo.is_lti &&
         this.aInfo.viewingb === 'immediately' &&
@@ -297,13 +316,21 @@ export default {
     },
     exitAssess () {
       window.location = window.exiturl;
+    },
+    showUserPrefs () {
+      window.GB_show(
+        this.$t('lti-userprefs'),
+        store.APIbase + '../admin/ltiuserprefs.php?cid=' + store.cid + '&greybox=true',
+        800, 'auto', true, 0, 0,
+        { label: 'Update Info', func: 'doSubmit' }
+      );
     }
   },
   mounted () {
     if (this.aInfo.displaymethod === 'livepoll') {
       // inject socket javascript
       var script = document.createElement('script');
-      script.src = 'https://' + this.aInfo.livepoll_server + ':3000/socket.io/socket.io.js';
+      script.src = 'https://' + this.aInfo.livepoll_server + '/socket.io/socket.io.js';
       document.getElementsByTagName('head')[0].appendChild(script);
     } else if (this.aInfo.displaymethod === 'video_cued' && !window.YT) {
       const tag = document.createElement('script');

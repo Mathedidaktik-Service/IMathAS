@@ -19,6 +19,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -150,12 +151,14 @@ foreach ($qns as $qn=>$parts) {
   if (!isset($timeactive[$qn])) {
     $timeactive[$qn] = 0;
   }
-  $ok_to_save = $assess_record->isSubmissionAllowed($qn, $qids[$qn], $parts);
-  foreach ($parts as $part) {
-    if ($ok_to_save === true || !empty($ok_to_save[$part])) {
-      $res = $assess_record->setAutoSave($now, $timeactive[$qn], $qn, $part);
-      if ($res !== '') {
-        $err = $res;  
+  if ($qn !== 'gen') {
+    $ok_to_save = $assess_record->isSubmissionAllowed($qn, $qids[$qn], $parts);
+    foreach ($parts as $part) {
+      if ($ok_to_save === true || !empty($ok_to_save[$part])) {
+        $res = $assess_record->setAutoSave($now, $timeactive[$qn], $qn, $part);
+        if ($res !== '') {
+          $err = $res;  
+        }
       }
     }
   }

@@ -296,23 +296,18 @@ if (!(isset($teacherid))) {
 			$qarr[':reviewdate'] = isset($_POST['doreview'])?2000000000:0;
 		}
 		if (isset($_POST['chgreqscoreaid'])) {
-			$sets[] = "reqscore=:reqscore";
+			$sets[] = "reqscorejson=:reqscorejson";
 			if ($_POST['reqscoreaid'] > 0) {
-				$qarr[':reqscore'] = Sanitize::onlyInt($_POST['reqscore']);
+				$reqscore = Sanitize::onlyInt($_POST['reqscore']);
+				$reqscoreaid = Sanitize::onlyInt($_POST['reqscoreaid']);
+				$reqscorecalctype = ($_POST['reqscorecalctype']==1)?1:0;
+				$qarr[':reqscorejson'] = json_encode([$reqscoreaid, $reqscore, $reqscorecalctype]);
 			} else {
-				$qarr[':reqscore'] = 0;
-			}
-			$sets[] = "reqscoreaid=:reqscoreaid";
-			$qarr[':reqscoreaid'] = Sanitize::onlyInt($_POST['reqscoreaid']);
-			if ($_POST['reqscorecalctype']==1) {
-				$sets[] = "reqscoretype=(reqscoretype | 2)";
-			} else {
-				$sets[] = "reqscoretype=(reqscoretype & ~2)";
+				$qarr[':reqscorejson'] = '';
 			}
 		}
 		if (isset($_POST['chgreqscoretype'])) {
 			if ($_POST['reqscoretype']==0) {
-				$sets[] = 'reqscore=ABS(reqscore)';
 				$sets[] = 'reqscoretype=(reqscoretype & ~1)';
 			} else {
 				$sets[] = 'reqscoretype=(reqscoretype | 1)';
@@ -432,6 +427,8 @@ if (!(isset($teacherid))) {
 		$line['caltag'] = isset($CFG['AMS']['caltag'])?$CFG['AMS']['caltag']:'?';
 		$line['calrtag'] = isset($CFG['AMS']['calrtag'])?$CFG['AMS']['calrtag']:'R';
 		$line['showtips'] = isset($CFG['AMS']['showtips'])?$CFG['AMS']['showtips']:1;
+		$line['posttoforum'] = 0;
+        $line['msgtoinstr'] = isset($CFG['AMS']['msgtoinstr'])?$CFG['AMS']['msgtoinstr']:0;
 		if ($line['defpenalty'][0]==='L') {
 			$line['defpenalty'] = substr($line['defpenalty'],1);
 			$skippenalty=10;
@@ -456,13 +453,14 @@ if (!(isset($teacherid))) {
 		getsubinfo($items,'0','','Assessment','&nbsp;&nbsp;');
 		$stm = $DBH->prepare("SELECT id,name,gbcategory FROM imas_assessments WHERE courseid=:courseid ORDER BY name");
 		$stm->execute(array(':courseid'=>$cid));
-		if ($stm->rowCount()==0) {
+		$assessrows = $stm->fetchAll(PDO::FETCH_NUM);
+		if (count($assessrows)==0) {
 			$page_assessListMsg = "<li>No Assessments to change</li>\n";
 		} else {
 			$page_assessListMsg = "";
 			$i=0;
 			$page_assessSelect = array();
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			foreach ($assessrows as $row) {
 				$page_assessSelect['val'][$i] = $row[0];
 				$page_assessSelect['label'][$i] = $row[1];
 				$agbcats[$row[0]] = $row[2];
@@ -475,12 +473,10 @@ if (!(isset($teacherid))) {
 		$page_gbcatSelect = array('val'=>[], 'label'=>[]);
 		$page_gbcatSelect['val'][0] = 0;
 		$page_gbcatSelect['label'][0] ='Default';
-		if ($stm->rowCount()>0) {
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
-				$page_gbcatSelect['val'][$i] = $row[0];
-				$page_gbcatSelect['label'][$i] = $row[1];
-				$i++;
-			}
+		while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			$page_gbcatSelect['val'][$i] = $row[0];
+			$page_gbcatSelect['label'][$i] = $row[1];
+			$i++;
 		}
 
 		$page_forumSelect = array();

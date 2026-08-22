@@ -6,6 +6,7 @@
 require_once "../init.php";
 require_once "../includes/htmlutil.php";
 require_once "../includes/TeacherAuditLog.php";
+require_once "../includes/viddatautil.php";
 
 /*** pre-html data manipulation, including function code *******/
 
@@ -39,7 +40,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 	$stm = $DBH->prepare("SELECT courseid,ver,submitby FROM imas_assessments WHERE id=?");
 	$stm->execute(array($aid));
 	$row = $stm->fetch(PDO::FETCH_ASSOC);
-	if ($row === null || $row['courseid'] != $cid) {
+	if ($row === false || $row['courseid'] != $cid) {
 		echo _("Invalid ID");
 		exit;
 	} else if ($row['ver'] > 1) {
@@ -110,34 +111,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			} else {
 				$itemorder  = $row[0] . "," . implode(",",$qids);
 			}
-			$viddata = $row[1];
-			if ($viddata != '') {
-				$nextnum = 0;
-				if ($row[0]!='') {
-					foreach (explode(',', $row[0]) as $iv) {
-						if (strpos($iv,'|')!==false) {
-							$choose = explode('|', $iv);
-							$nextnum += $choose[0];
-						} else {
-							$nextnum++;
-						}
-					}
-				}
-				$numnew= count($checked);
-				$viddata = unserialize($viddata);
-				if (!isset($viddata[count($viddata)-1][1])) {
-					$finalseg = array_pop($viddata);
-				} else {
-					$finalseg = '';
-				}
-				for ($i=$nextnum;$i<$nextnum+$numnew;$i++) {
-					$viddata[] = array('','',$i);
-				}
-				if ($finalseg != '') {
-					$viddata[] = $finalseg;
-				}
-				$viddata = serialize($viddata);
-			}
+			$viddata = appendBlankVidSegments($row[0], count($checked), $row[1]);
 			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata WHERE id=:id");
 			$stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':id'=>$aid));
 
@@ -873,7 +847,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 					}
 
 				}
-				if ($searchall==1) {
+				//if ($searchall==1) {
 					$query .= " LIMIT 300";
 					$offset = 0;
 					if (isset($_REQUEST['offset'])) {
@@ -882,7 +856,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 							$query .= " OFFSET $offset";
 						}
 					}
-				}
+				//}
 
 				if ($search=='recommend' && count($existingq)>0) {
 					$existingqlist = implode(',', array_map('intval',$existingq));  //pulled from database, so no quotes needed
@@ -1327,7 +1301,7 @@ if ($overwriteBody==1) {
 		var itemarray = <?php echo json_encode($jsarr, JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE); ?>;
 		var beentaken = <?php echo ($beentaken) ? 1:0; ?>;
         var displaymethod = "<?php echo Sanitize::encodeStringForDisplay($displaymethod); ?>";
-        var lastitemhash = "<?php echo md5($itemorder); ?>";
+        var lastitemhash = "<?php echo md5($itemorder . $assessintro); ?>";
 		//$(refreshTable);
 		refreshTable();
 	</script>
@@ -1473,7 +1447,7 @@ if ($overwriteBody==1) {
 <?php
 					}
 				}
-				if ($searchall==1 && ($searchlimited || $offset>0)) {
+				if ($searchlimited || $offset>0) {
 					echo '<tr><td></td><td><i>'._('Search cut off at 300 results');
 					echo '<br>'._('Showing ').($offset+1).'-'.($offset + 300).'. ';
 					if ($offset>0) {

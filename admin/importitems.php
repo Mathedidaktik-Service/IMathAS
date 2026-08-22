@@ -56,7 +56,7 @@ function additem($itemtoadd,$item,$questions,$qset) {
 			$pair = explode('=',$set);
 			$item[$itemtoadd][$pair[0]] = $pair[1];
 		}
-		$setstoadd = explode(',','name,summary,intro,avail,startdate,enddate,reviewdate,timelimit,displaymethod,defpoints,defattempts,deffeedback,defpenalty,shuffle,password,cntingb,minscore,showcat,showhints,isgroup,allowlate,exceptionpenalty,earlybonus,noprint,groupmax,endmsg,eqnhelper,caltag,calrtag,showtips,deffeedbacktext,istutorial,viddata');
+		$setstoadd = explode(',','name,summary,intro,avail,startdate,enddate,reviewdate,timelimit,displaymethod,defpoints,defattempts,deffeedback,defpenalty,shuffle,password,cntingb,minscore,showcat,showhints,isgroup,allowlate,exceptionpenalty,exceptionpenaltyinterval,earlybonus,noprint,groupmax,endmsg,eqnhelper,caltag,calrtag,showtips,deffeedbacktext,istutorial,viddata');
 		$qarr = array();
 		$valsets = ":courseid";
 		$tosets = 'courseid';
@@ -122,10 +122,11 @@ function additem($itemtoadd,$item,$questions,$qset) {
 			//add question or get system id.
 			$stm = $DBH->prepare("SELECT id,adddate,lastmoddate,deleted FROM imas_questionset WHERE uniqueid=:uniqueid");
 			$stm->execute(array(':uniqueid'=>$questions[$qid]['uqid']));
-			$questionexists = ($stm->rowCount()>0);
+			$row = $stm->fetch(PDO::FETCH_NUM);
+			$questionexists = ($row !== false);
 			//echo "Question ID ".$questions[$qid]['uqid'].($questionexists?" exists":" not found");
 			if ($questionexists) {
-				list($thisqsetid, $qadddate, $qlastmoddate, $qdeleted) = $stm->fetch(PDO::FETCH_NUM);
+				list($thisqsetid, $qadddate, $qlastmoddate, $qdeleted) = $row;
 			}
 			if ($questionexists && ($qdeleted==1 || $_POST['merge']==1 || $_POST['merge']==2)) {
 				$questions[$qid]['qsetid'] = $thisqsetid;

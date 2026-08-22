@@ -64,9 +64,7 @@ $old = 24*60*60*(isset($CFG['cleanup']['old'])?$CFG['cleanup']['old']:610);
 $delay = 24*60*60*(isset($CFG['cleanup']['delay'])?$CFG['cleanup']['delay']:120);
 $msgfrom = isset($CFG['cleanup']['msgfrom'])?$CFG['cleanup']['msgfrom']:0;
 $keepsent = isset($CFG['cleanup']['keepsent'])?$CFG['cleanup']['keepsent']:1;
-$clearpw = 24*60*60*(isset($CFG['cleanup']['clearoldpw'])?$CFG['cleanup']['clearoldpw']:365);
-$delaudit = 24*60*60*($CFG['cleanup']['deloldaudit'] ?? 0);
-$delltiqueue = 24*60*60*($CFG['cleanup']['deloldltiqueue'] ?? 180);
+
 
 //run notifications 10 in a batch
 
@@ -152,80 +150,55 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 	$num++;
 }
 
-//run cleanup operation, 1 in a batch
-$stm = $DBH->prepare("SELECT id,enddate FROM imas_courses WHERE cleanupdate>1 AND cleanupdate<? ORDER BY cleanupdate LIMIT 1");
-$stm->execute(array($now));
-list($cidtoclean,$enddate) = $stm->fetch(PDO::FETCH_NUM);
-$skip = false;
-if ($enddate<2000000000) { //check to see if enddate reset
-	if ($enddate > $now - $old) {
-		// enddate has been updated - remove from cleaning plan
+//run cleanup operation, several in a batch
+$mainstm = $DBH->prepare("SELECT id,enddate FROM imas_courses WHERE cleanupdate>1 AND cleanupdate<? ORDER BY cleanupdate LIMIT 10");
+$mainstm->execute(array($now));
+// do up to 10, if we can start within 45 seconds of script start
+while (time() - $now < 45 && $row = $mainstm->fetch(PDO::FETCH_NUM)) {
+	list($cidtoclean,$enddate) = $row;
+	$skip = false;
+	if ($enddate<2000000000) { //check to see if enddate reset
+		if ($enddate > $now - $old) {
+			// enddate has been updated - remove from cleaning plan
+			$skip = true;
+		}
+	}
+	// check to see if students have become active or course already emptied
+	$stuchk->execute(array($cidtoclean));
+	$stulast = $stuchk->fetchColumn(0);
+	if ($stulast === null || $stulast > $now - $old) {
+		// course is already empty, or new student activity - remove from cleanup
 		$skip = true;
 	}
-}
-// check to see if students have become active or course already emptied
-$stuchk->execute(array($cidtoclean));
-$stulast = $stuchk->fetchColumn(0);
-if ($stulast === null || $stulast > $now - $old) {
-	// course is already empty, or new student activity - remove from cleanup
-	$skip = true;
-}
 
-if (!$skip) {
-	$stm = $DBH->prepare("SELECT userid FROM imas_students WHERE courseid=?");
-	$stm->execute(array($cidtoclean));
-	$stus = array();
-	while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
-		$stus[] = $row['userid'];
+	if (!$skip) {
+		$stm = $DBH->prepare("SELECT userid FROM imas_students WHERE courseid=?");
+		$stm->execute(array($cidtoclean));
+		$stus = array();
+		while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
+			$stus[] = $row['userid'];
+		}
+		// not including in transaction to prevent cleanup from stalling on a
+		// weird course
+		$updcrs->execute(array(0, $cidtoclean));
+
+		if (count($stus)>0) {
+			$DBH->beginTransaction();
+			unenrollstu($cidtoclean, $stus, true, false, true, 2);
+			$stm = $DBH->prepare("DELETE FROM imas_tutors WHERE courseid=?");
+			$stm->execute(array($cidtoclean));
+			// delete any lingering assessment records (likely belonging to teacher)
+			$stm = $DBH->prepare("DELETE ias FROM imas_assessment_sessions AS ias JOIN imas_assessments AS ia ON ias.assessmentid=ia.id WHERE ia.courseid=?");
+			$stm->execute(array($cidtoclean));
+			$stm = $DBH->prepare("DELETE iar FROM imas_assessment_records AS iar JOIN imas_assessments AS ia ON iar.assessmentid=ia.id WHERE ia.courseid=?");
+			$stm->execute(array($cidtoclean));
+			$DBH->commit();
+
+			$stm = $DBH->prepare("INSERT INTO imas_log (time,log) VALUES (?,?)");
+			$stm->execute([$now, "Course cleanup complete on $cidtoclean"]);
+		}
+	} else {
+		$updcrs->execute(array(0, $cidtoclean));
 	}
-	// not including in transaction to prevent cleanup from stalling on a
-	// weird course
-	$updcrs->execute(array(0, $cidtoclean));
-
-	if (count($stus)>0) {
-		$DBH->beginTransaction();
-		unenrollstu($cidtoclean, $stus, true, false, true, 2);
-        $stm = $DBH->prepare("DELETE FROM imas_tutors WHERE courseid=?");
-	    $stm->execute(array($cidtoclean));
-        // delete any lingering assessment records (likely belonging to teacher)
-        $stm = $DBH->prepare("DELETE ias FROM imas_assessment_sessions AS ias JOIN imas_assessments AS ia ON ias.assessmentid=ia.id WHERE ia.courseid=?");
-	    $stm->execute(array($cidtoclean));
-        $stm = $DBH->prepare("DELETE iar FROM imas_assessment_records AS iar JOIN imas_assessments AS ia ON iar.assessmentid=ia.id WHERE ia.courseid=?");
-	    $stm->execute(array($cidtoclean));
-		$DBH->commit();
-
-		$stm = $DBH->prepare("INSERT INTO imas_log (time,log) VALUES (?,?)");
-		$stm->execute([$now, "Course cleanup complete on $cidtoclean"]);
-	}
-} else {
-	$updcrs->execute(array(0, $cidtoclean));
 }
 
-//clear out any old pw
-if ($clearpw>0) {
-	/*
-	As is, this will disable newly created accounts if they're not enrolled in anything,
-	which probably isn't ideal
-
-	$query = "UPDATE imas_users SET password=CONCAT('cleared_',MD5(CONCAT(SID, UUID()))) ";
-	$query .= "WHERE lastaccess<? AND rights<>11 AND rights<>76 AND rights<>77";
-	$stm = $DBH->prepare($query);
-	$stm->execute(array($now - $clearpw));
-	*/
-}
-
-if ($delaudit > 0) {
-    $query = "DELETE FROM imas_audit_log WHERE time<?";
-	$stm = $DBH->prepare($query);
-	$stm->execute(array($now - $delaudit));
-}
-
-if ($delltiqueue > 0) {
-    $query = "DELETE FROM imas_ltiqueue WHERE failures>6 AND sendon < ?";
-    $stm = $DBH->prepare($query);
-	$stm->execute(array($now - $delltiqueue));
-
-    $query = "DELETE FROM imas_log WHERE time < ? AND log LIKE 'LTI update giving up%'";
-    $stm = $DBH->prepare($query);
-	$stm->execute(array($now - $delltiqueue));
-}

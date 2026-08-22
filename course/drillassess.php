@@ -2,6 +2,7 @@
 //IMathAS:  Drill Assess player (updated quickdrill)
 //(c) 2011 David Lippman
 
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 if ($courseUIver > 1) {
     require_once '../assess2/AssessStandalone.php';
@@ -29,11 +30,11 @@ $now = time();
 
 $stm = $DBH->prepare("SELECT * FROM imas_drillassess WHERE id=:id AND courseid=:courseid");
 $stm->execute(array(':id'=>$daid, ':courseid'=>$cid));
-if ($stm->rowCount()==0) {
+$dadata = $stm->fetch(PDO::FETCH_ASSOC);
+if ($dadata === false) {
 	echo _("Invalid drill assessment id");
 	exit;
 }
-$dadata = $stm->fetch(PDO::FETCH_ASSOC);
 $n = $dadata['n'];
 $sa = $dadata['showtype'];
 $showscore = ($sa==0 || $sa==1 || $sa==4);
@@ -67,7 +68,8 @@ $lastanswers = array();
 $rawscores = array();
 $stm = $DBH->prepare("SELECT * FROM imas_drillassess_sessions WHERE drillassessid=:drillassessid AND userid=:userid");
 $stm->execute(array(':drillassessid'=>$daid, ':userid'=>$userid));
-if ($stm->rowCount()==0) {
+$sessdata = $stm->fetch(PDO::FETCH_ASSOC);
+if ($sessdata === false) {
 	//new
 	$curitem = -1;
 	$seed = rand(1,9999);
@@ -77,7 +79,6 @@ if ($stm->rowCount()==0) {
 	$stm->execute(array(':drillassessid'=>$daid, ':userid'=>$userid, ':scorerec'=>$scorerecarr));
 	$starttime = 0;
 } else {
-	$sessdata = $stm->fetch(PDO::FETCH_ASSOC);
 	$curitem = $sessdata['curitem'];
 	if ($curitem > -1) {
 		$curitemid = $itemids[$curitem];
@@ -250,10 +251,10 @@ if ($courseUIver > 1) {
     $placeinhead = '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/assessment/mathtest.css" />';
     $placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/assess2/vue/css/style.css?v='.$lastvueupdate.'" />';
     $placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/assess2/print.css?v='.$lastvueupdate.'" media="print">';
-    $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=020326" type="text/javascript"></script>';
+    $placeinhead .= '<script src="'.$staticroot.'/mathquill/mathquill.min.js?v=070726" type="text/javascript"></script>';
     $placeinhead .= '<script src="'.$staticroot.'/javascript/assess2_min.js?v='.$lastvueupdate.'" type="text/javascript"></script>';
     $placeinhead .= '<script src="'.$staticroot.'/javascript/assess2supp.js?v='.$lastvueupdate.'" type="text/javascript"></script>';
-    $placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mathquill-basic.css?v=010726">
+    $placeinhead .= '<link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mathquill-basic.css?v=070726">
         <link rel="stylesheet" type="text/css" href="'.$staticroot.'/mathquill/mqeditor.css?v=020226">';
     $placeinhead .= '<style>form > hr { border: 0; border-bottom: 1px solid #ddd;}</style>';
     require_once "../header.php";

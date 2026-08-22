@@ -158,6 +158,8 @@ array( 'input'=>'|--', 'tex'=>'vdash'),
 
 // Miscellaneous symbols
 array( 'input'=>'int'),
+array( 'input'=>'iint'),
+array( 'input'=>'iiint'),
 array( 'input'=>'dx', 'output'=>'{:d x:}', 'definition'=>TRUE),
 array( 'input'=>'dy', 'output'=>'{:d y:}', 'definition'=>TRUE), 
 array( 'input'=>'dz', 'output'=>'{:d z:}', 'definition'=>TRUE), 
@@ -176,6 +178,7 @@ array( 'input'=>':\'', 'tex'=>'because'),
 array( 'input'=>'/_', 'tex'=>'angle'),
 array( 'input'=>'/_\\', 'tex'=>'triangle'),
 array( 'input'=>'\\ ', 'output'=>'\\ ', 'val'=>'true'),
+array( 'input'=>'thinspace'),
 array( 'input'=>'%', 'tex'=>'%', 'notexcopy'=>TRUE),
 array( 'input'=>'frown'),
 array( 'input'=>'quad'),
@@ -859,6 +862,11 @@ function AMTparseExpr($str,$rightbracket) {
 function AMTparseAMtoTeX($str) {
 	$this->AMnestingDepth = 0;
 	$str = str_replace(array('&nbsp;','&gt;','&lt;'),array('','>','<'),$str);
+	$str = preg_replace_callback('/&(\w+);/', function($m) {
+		if (in_array($m[1], $this->AMnames)) {
+			return $m[1];
+		}
+	}, $str);
 	$str = preg_replace('/^\s+/','',$str);
 	if (trim($str)=='') {return '';}
 	

@@ -161,13 +161,11 @@ export default {
         // past due
         return this.$t('closed-pastdue', { ed: this.settings.enddate_disp });
       } else if (this.settings.available === 'needprereq') {
-        return this.$t('closed-needprereq') + ' ' +
-          this.$t('closed-prereqreq', {
-            score: this.settings.reqscorevalue,
-            name: this.settings.reqscorename
-          });
+        return this.$t('closed-needprereq') + ': ' + this.settings.reqscorevalue;
       } else if (this.settings.hasOwnProperty('pasttime')) {
         return this.$t('closed-pasttime');
+      } else if (this.settings.available === 'retakewait') {
+        return this.$t('closed-retakewait', { date: this.settings.retake_time_disp });
       } else if (this.settings.has_active_attempt === false && this.settings.can_retake === false) {
         return this.$t('closed-no_attempts');
       }
@@ -193,6 +191,7 @@ export default {
     },
     showLatePassOffer () {
       return (this.settings.available !== 'needprereq' &&
+        this.settings.available !== 'retakewait' &&
         !this.settings.hasOwnProperty('pasttime'));
     },
     latepassExtendMsg () {
@@ -249,8 +248,8 @@ export default {
       return (
         !this.canViewAll &&
         this.settings.can_viewingb === 1 &&
-        this.settings.prev_attempts.length > 0 &&
-        (this.settings.available === 'practice' || this.settings.available === 'pastdue')
+        (this.settings.prev_attempts.length > 0 || 
+          (this.settings.submitby === 'by_question' && this.settings.has_active_attempt === true))
       );
     },
     canViewAll () {

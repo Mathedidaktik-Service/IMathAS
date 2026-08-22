@@ -19,6 +19,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -156,7 +157,7 @@ $assess_info->loadLTIMsgPosts($userid, $canViewAll);
 $include_from_assess_info = array(
   'available', 'startdate', 'enddate', 'original_enddate', 'submitby',
   'extended_with', 'allowed_attempts', 'showscores', 'timelimit', 'enddate_in',
-  'lti_showmsg', 'lti_msgcnt', 'lti_forumcnt'
+  'lti_showmsg', 'lti_msgcnt', 'lti_forumcnt', 'retakewait', 'drillsettings'
 );
 $assessInfoOut = $assess_info->extractSettings($include_from_assess_info);
 //get attempt info
@@ -230,6 +231,9 @@ if (count($qns) > 0) {
     if (!empty($errors)) {
       $scoreErrors[$qn] = $errors;
     }
+    if ($assess_info->getSetting('displaymethod') === 'drill') {
+      $assess_record->processDrillProgress($qn);
+    }
   }
 
   // If it's full test, we'll score time at the assessment attempt level
@@ -250,7 +254,26 @@ if (count($qns) > 0) {
   $assess_info->loadQuestionSettings('all', $end_attempt, false);
 }
 
-// save autosaves, if set 
+// Drill mode: make sure the actively-drilling question's timer expiration
+// gets checked even if nothing new was actually submitted for it (e.g. a
+// client-side timer firing on a blank/unanswered try), and that its
+// possibly-updated state ends up in the response. Safe to call even when
+// the question was already handled above (finishDrillTimeout no-ops once
+// the drill is no longer active).
+$activeDrillQn = -1;
+if ($assess_info->getSetting('displaymethod') === 'drill') {
+  $activeDrillQn = $assess_record->getActiveDrillQuestion();
+  if ($activeDrillQn > -1) {
+    if (!in_array($activeDrillQn, $qns)) {
+      list($activeDrillQid, ) = $assess_record->getQuestionId($activeDrillQn);
+      $assess_info->loadQuestionSettings(array($activeDrillQid), true, false);
+    }
+    $assess_record->finishDrillTimeout($activeDrillQn);
+    $assess_record->reTotalAssess(array($activeDrillQn));
+  }
+}
+
+// save autosaves, if set
 $assessInfoOut['saved_autosaves'] = false;
 if (!empty($_POST['autosave-tosaveqn'])) {
     $autosave_qns = json_decode($_POST['autosave-tosaveqn'], true);
@@ -272,7 +295,11 @@ if (!empty($_POST['autosave-tosaveqn'])) {
                 if (!isset($timeactive[$qn])) {
                     $timeactive[$qn] = 0;
                 }
-                $ok_to_save = $assess_record->isSubmissionAllowed($qn, $autosave_qids[$qn], $parts);
+                if ($qn !== 'gen') {
+                  $ok_to_save = $assess_record->isSubmissionAllowed($qn, $autosave_qids[$qn], $parts);
+                } else {
+                  $ok_to_save = false;
+                }
                 foreach ($parts as $part) {
                     if ($ok_to_save === true || !empty($ok_to_save[$part])) {
                      $assess_record->setAutoSave($now, $autosave_timeactive[$qn] ?? 0, $qn, $part);
@@ -321,6 +348,14 @@ if ($end_attempt) {
     $assessInfoOut['can_retake'] = false;
   } else {
     $assessInfoOut['can_retake'] = (count($assessInfoOut['prev_attempts']) < $assessInfoOut['allowed_attempts']);
+    if ($assessInfoOut['retakewait'] > 0) {
+      $retaketime = $assess_record->getNextRetaketime();
+      if ($retaketime > 0) {
+        $assessInfoOut['can_retake'] = false;
+        $assessInfoOut['retake_time'] = $retaketime;
+        $assessInfoOut['available'] = 'retakewait';
+      }
+    }
   }
 
   // get endmsg
@@ -363,9 +398,10 @@ if ($end_attempt) {
         'now' => $now,
         'sig' => $livepollsig
       ));
-      $r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/qscored?'.$qs);
+      $port = $CFG['GEN']['livepollserverport'] ?? '3000';
+      $r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/qscored?'.$qs);
       $assessInfoOut['lpres'] = $r;
-      $assessInfoOut['lpq'] = 'https://'.$CFG['GEN']['livepollserver'].':3000/qscored?'.$qs;
+      $assessInfoOut['lpq'] = 'https://'.$CFG['GEN']['livepollserver'].':'.$port.'/qscored?'.$qs;
     }
   } else {
     // grab question settings data with HTML
@@ -374,6 +410,9 @@ if ($end_attempt) {
   $assessInfoOut['questions'] = array();
   foreach ($qns as $qn) {
     $assessInfoOut['questions'][$qn] = $assess_record->getQuestionObject($qn, $showscores, true, true);
+  }
+  if ($activeDrillQn > -1 && !in_array($activeDrillQn, $qns)) {
+    $assessInfoOut['questions'][$activeDrillQn] = $assess_record->getQuestionObject($activeDrillQn, $showscores, true, true);
   }
   if (!empty($scoreErrors)) {
     $assessInfoOut['scoreerrors'] = $scoreErrors;

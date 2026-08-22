@@ -14,6 +14,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -68,16 +69,19 @@ $include_from_assess_info = array(
   'name', 'summary', 'available', 'startdate', 'enddate', 'enddate_in',
   'original_enddate', 'extended_with', 'timelimit', 'timelimit_type', 'points_possible',
   'submitby', 'displaymethod', 'groupmax', 'isgroup', 'showscores', 'viewingb', 'scoresingb',
-  'can_use_latepass', 'allowed_attempts', 'retake_penalty', 'exceptionpenalty', 'earlybonus',
+  'can_use_latepass', 'allowed_attempts', 'retake_penalty', 'exceptionpenalty', 'exceptionpenaltyinterval', 'earlybonus',
+  'active_late_penalty', 'current_late_penalty_pct',
   'timelimit_multiplier', 'latepasses_avail', 'latepass_extendto', 'keepscore',
-  'noprint', 'overtime_penalty', 'overtime_grace', 'reqscorename', 'reqscorevalue', 
-  'attemptext', 'showworktype', 'latepass_enddate', 'latepass_after', 'latepass_reason'
+  'noprint', 'overtime_penalty', 'overtime_grace', 'reqscorevalue', 
+  'attemptext', 'showworktype', 'singleshowwork', 'latepass_enddate', 'latepass_after', 'latepass_reason',
+  'retakewait', 'drillsettings'
 );
 $assessInfoOut = $assess_info->extractSettings($include_from_assess_info);
 
 // livepoll server location, if needed
 if ($assessInfoOut['displaymethod'] === 'livepoll') {
-  $assessInfoOut['livepoll_server'] = $CFG['GEN']['livepollserver'];
+  $port = $CFG['GEN']['livepollserverport'] ?? '3000';
+  $assessInfoOut['livepoll_server'] = $CFG['GEN']['livepollserver'] . ':' . $port;
 }
 
 // indicate if teacher or tutor user
@@ -176,6 +180,21 @@ if (!$assessInfoOut['has_active_attempt']) {
   }
 }
 
+//get retakewait info
+if ($assessInfoOut['available'] === 'yes' &&
+  $assessInfoOut['retakewait'] > 0 && 
+  !$assessInfoOut['has_active_attempt'] && 
+  $assessInfoOut['can_retake'] && // make sure they'd otherwise be able to retake
+  count($assessInfoOut['prev_attempts']) > 0
+) {
+  $retaketime = $assess_record->getNextRetaketime();
+  if ($retaketime > 0) {
+    $assessInfoOut['can_retake'] = false;
+    $assessInfoOut['retake_time'] = $retaketime;
+    $assessInfoOut['available'] = 'retakewait';
+  }
+}
+
 // get showwork_after, showwork_cutoff (min), showwork_cutoff_in (timestamp)
 getShowWorkAfter($assessInfoOut, $assess_record, $assess_info);
 
@@ -246,6 +265,8 @@ $assessInfoOut['can_viewingb'] = $assess_info->reshowQuestionsInGb() ? 1 : 0;
 $assessInfoOut['session_life'] = $CFG['GEN']['sessionmaxlife'] ?? 432000;
 
 $assessInfoOut['summary'] = filter($assessInfoOut['summary']);
+
+$assessInfoOut['srready'] = ($_SESSION['userprefs']['graphdisp'] == 0 && $_SESSION['userprefs']['drawentry'] == 0);
 
 //prep date display
 prepDateDisp($assessInfoOut);

@@ -16,6 +16,7 @@
 
 
 $no_session_handler = 'json_error';
+$init_csrfp_scope = 'question';
 require_once "../init.php";
 require_once "./common_start.php";
 require_once "./AssessInfo.php";
@@ -61,7 +62,7 @@ $include_from_assess_info = array(
   'available', 'startdate', 'enddate', 'original_enddate',
   'extended_with', 'latepasses_avail', 'latepass_extendto',
   'can_use_latepass', 'enddate_in', 'timelimit',
-  'reqscorename', 'reqscorevalue' 
+  'reqscorevalue' 
 );
 $assessInfoOut = $assess_info->extractSettings($include_from_assess_info);
 

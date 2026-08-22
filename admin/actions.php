@@ -47,6 +47,14 @@ if ($from=='admin') {
     $breadcrumbbase .= '<a href="'.$backloc.'">'._('Unhide Courses').'</a> &gt; ';
 }
 
+// extra safety check
+$referer = $_SERVER['HTTP_REFERER'] ?? '';
+if (strpos($referer, $GLOBALS['basesiteurl'].'/admin/forms.php') !== 0 &&
+	strpos($referer, $GLOBALS['basesiteurl'].'/admin/actions.php') !== 0) {
+	echo _('Invalid request');
+	exit;
+}
+
 switch($_POST['action']) {
 	case "chgrights":
 		if ($myrights < 75 && ($myspecialrights&16)!=16 && ($myspecialrights&32)!=32) {
@@ -1058,7 +1066,7 @@ switch($_POST['action']) {
 			if ($myrights < 75) {
 				$stm = $DBH->prepare("SELECT id FROM imas_courses WHERE id=:id AND ownerid=:ownerid");
 				$stm->execute(array(':id'=>$_GET['id'], ':ownerid'=>$userid));
-				if ($stm->rowCount()>0) {
+				if ($stm->fetchColumn() !== false) {
 					$oktodel = true;
 				}
 			} else if ($myrights==100) {
@@ -1066,7 +1074,7 @@ switch($_POST['action']) {
 			} else {
 				$stm = $DBH->prepare("SELECT imas_courses.id FROM imas_courses,imas_users WHERE imas_courses.id=:id AND imas_courses.ownerid=imas_users.id AND imas_users.groupid=:groupid");
 				$stm->execute(array(':id'=>$_GET['id'], ':groupid'=>$groupid));
-				if ($stm->rowCount()>0) {
+				if ($stm->fetchColumn() !== false) {
 					$oktodel = true;
 				}
 			}
@@ -1178,7 +1186,7 @@ switch($_POST['action']) {
 		if ($myrights <100) { echo "You don't have the authority for this action"; break;}
 		$stm = $DBH->prepare("SELECT id FROM imas_groups WHERE name=:name");
 		$stm->execute(array(':name'=>$_POST['gpname']));
-		if ($stm->rowCount()>0) {
+		if ($stm->fetchColumn() !== false) {
 			echo "<html><body>Group name already exists.  <a href=\"forms.php?action=listgroups\">Try again</a></body></html>\n";
 			exit;
 		}
@@ -1191,7 +1199,7 @@ switch($_POST['action']) {
 		if ($myrights <100) { echo "You don't have the authority for this action"; break;}
 		$stm = $DBH->prepare("SELECT id FROM imas_groups WHERE name=:name AND id<>:id");
 		$stm->execute(array(':name'=>$_POST['gpname'], ':id'=>$_GET['id']));
-		if ($stm->rowCount()>0) {
+		if ($stm->fetchColumn() !== false) {
 			echo "<html><body>Group name already exists.  <a href=\"forms.php?action=modgroup&id=".Sanitize::encodeUrlParam($_GET['id'])."\">Try again</a></body></html>\n";
 			exit;
 		}
@@ -1279,7 +1287,7 @@ switch($_POST['action']) {
 		header('Location: ' . $GLOBALS['basesiteurl'] . '/admin/forms.php?action=listfedpeers&from='.Sanitize::encodeUrlParam($from));
 		exit;
 		break;
-	case "removediag";
+	case "removediag":
 		if ($myrights <60) { echo "You don't have the authority for this action"; break;}
 		$stm = $DBH->prepare("SELECT imas_users.id,imas_users.groupid FROM imas_users JOIN imas_diags ON imas_users.id=imas_diags.ownerid AND imas_diags.id=:id");
 		$stm->execute(array(':id'=>$_GET['id']));

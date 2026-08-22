@@ -17,6 +17,7 @@ if (isset($_GET['callength']) && isset($_GET['cid'])) {
 }
 
 require_once "filehandler.php";
+require_once 'reqscorefuncs.php';
 
 function showcalendar($refpage, $toprightheader = '') {
 global $DBH;
@@ -152,7 +153,7 @@ $k = 0;
 $bestscores_stm = null;
 if ($latepasses > 0 && $courseUIver > 1) {
 	$query = 'SELECT ia.id,ia.name,ia.startdate,ia.enddate,ia.LPcutoff,ia.reviewdate,';
-	$query .= 'ia.gbcategory,ia.reqscore,ia.reqscoreaid,ia.reqscoretype,ia.timelimit,';
+	$query .= 'ia.gbcategory,ia.reqscorejson,ia.reqscoretype,ia.timelimit,';
 	$query .= 'ia.allowlate,ia.caltag,ia.calrtag,ia.ver,iar.status ';
 	$query .= 'FROM imas_assessments AS ia LEFT JOIN imas_assessment_records AS iar ';
 	$query .= 'ON ia.id=iar.assessmentid AND iar.userid=:uid WHERE ia.avail=1 AND ';
@@ -160,7 +161,7 @@ if ($latepasses > 0 && $courseUIver > 1) {
 	$stm = $DBH->prepare($query);
 	$stm->execute(array(':courseid'=>$cid, ':uid'=>$userid));
 } else {
-	$stm = $DBH->prepare("SELECT id,name,startdate,enddate,LPcutoff,reviewdate,gbcategory,reqscore,reqscoreaid,reqscoretype,timelimit,allowlate,caltag,calrtag,ver FROM imas_assessments WHERE avail=1 AND date_by_lti<>1 AND courseid=:courseid AND enddate<2000000000 ORDER BY name");
+	$stm = $DBH->prepare("SELECT id,name,startdate,enddate,LPcutoff,reviewdate,gbcategory,reqscorejson,reqscoretype,timelimit,allowlate,caltag,calrtag,ver FROM imas_assessments WHERE avail=1 AND date_by_lti<>1 AND courseid=:courseid AND enddate<2000000000 ORDER BY name");
 	$stm->execute(array(':courseid'=>$cid));
 }
 while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
@@ -212,60 +213,22 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 	}
 
 	$showgrayedout = false;
-    if (!isset($teacherid) && $status < 2 && abs($row['reqscore'])>0 && $row['reqscoreaid']>0 && 
-        (!isset($exceptions[$row['id']]) || ($exceptions[$row['id']]['waivereqscore']&1)==0) &&
-        empty($excused['A'.$row['reqscoreaid']])
-    ) {
-		if ($bestscores_stm===null) { //only prepare once
-			if ($courseUIver > 1) {
-				$query = 'SELECT ia.ver,ia.name,ia.ptsposs,iar.score FROM
-					imas_assessments AS ia LEFT JOIN imas_assessment_records AS iar
-					ON iar.assessmentid=ia.id AND iar.userid=:userid WHERE ia.id=:assessmentid';
+
+	$preReqNote = '';
+	if (!isset($teacherid) && $status < 2 && $row['reqscorejson']!='' && 
+        (!isset($exceptions[$row['id']]) || ($exceptions[$row['id']]['waivereqscore']&1)==0)
+	) {
+		[$meetsPrereq, $prereqstr] = meetsReqScore(json_decode($row['reqscorejson'],true), true);
+        $preReqNote = '<span class="small">' . _('Prerequisite: ') . Sanitize::encodeStringForDisplay($prereqstr).'</span>';
+        if (!$meetsPrereq) {
+			if ($row['reqscoretype']&1) {
+				$showgrayedout = true;
 			} else {
-				$query = 'SELECT ia.ver,ia.name,ia.ptsposs,ias.bestscores FROM
-					imas_assessments AS ia LEFT JOIN imas_assessment_sessions AS ias
-					ON ias.assessmentid=ia.id AND ias.userid=:userid WHERE ia.id=:assessmentid';
+				continue;
 			}
-			$bestscores_stm = $DBH->prepare($query);
-		}
-		$bestscores_stm->execute(array(':assessmentid'=>$row['reqscoreaid'], ':userid'=>$userid));
-		list($reqaver,$reqaname,$reqscoreptsposs,$scores) = $bestscores_stm->fetch(PDO::FETCH_NUM);
-	   if ($scores === null) {
-	   	   if ($row['reqscore']<0 || $row['reqscoretype']&1) {
-	   	   	   $showgrayedout = true;
-	   	   } else {
-	   	   	   continue;
-	   	   }
-	   } else {
-			 if ($reqaver > 1) {
-				 $reqascore = $scores;
-			 } else {
-				 $scores = explode(';', $scores);
-				 $reqascore = getpts($scores[0]);
-			 }
-			 if ($row['reqscoretype']&2) { //using percent-based
-				 if ($reqscoreptsposs==-1) {
-					 require_once "../includes/updateptsposs.php";
-					 $reqscoreptsposs = updatePointsPossible($row['reqscoreaid']);
-				 }
-				 if ($reqscoreptsposs > 0 && round(100*$reqascore/$reqscoreptsposs,1)+.02<abs($row['reqscore'])) {
-					 if ($row['reqscore']<0 || $row['reqscoretype']&1) {
-						 $showgrayedout = true;
-					 } else {
-						 continue;
-					 }
-				 }
-			 } else { //points based
-				 if (round($reqascore,1)+.02<abs($row['reqscore'])) {
-					 if ($row['reqscore']<0 || $row['reqscoretype']&1) {
-						 $showgrayedout = true;
-					 } else {
-						 continue;
-					 }
-				 }
-			 }
-		 }
+		}  
 	}
+
 	if ($row['reviewdate']<$uppertime && $row['reviewdate']>$exlowertime && (($row['reviewdate']>0 && $now>$row['enddate']) || $editingon)) { //has review, and we're past enddate
 		list($moday,$time) = explode('~',tzdate('Y-n-j~g:i a',$row['reviewdate']));
 		$row['name'] = htmlentities($row['name'], ENT_COMPAT | ENT_HTML401, "UTF-8", false);
@@ -314,9 +277,7 @@ while ($row = $stm->fetch(PDO::FETCH_ASSOC)) {
 		$row['name'] = htmlentities($row['name'], ENT_COMPAT | ENT_HTML401, "UTF-8", false);
 		if ($showgrayedout) {
 			$colors = '#ccc';
-			$row['name'] .= ' <span class="small">'._('Prerequisite: ') .
-				abs($row['reqscore']).(($row['reqscoretype']&2)?'%':_(' points')) .
-				_(' on ').Sanitize::encodeStringForDisplay($reqaname).'</span> ';
+			$row['name'] .= ' '. $preReqNote;
 		} else {
 			$colors = makecolor2($row['startdate'],$row['enddate'],$now);
 		}
@@ -731,7 +692,7 @@ foreach ($itemsimporder as $item) {
 				$assess[$moday][$k] = $byid['A'.$datetype.$itemsassoc[$item][1]][3];
 				$names[$k] = $byid['A'.$datetype.$itemsassoc[$item][1]][4];
 				//if (($greyitems[$item]&$byid['A'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
-				if (($byid['A'.$datetype.$itemsassoc[$item][1]][5]>0 && !isset($teacherid)) || isset($hiddenitems[$item])) {  //hide link and grey if not current
+				if (!$editingon && (($byid['A'.$datetype.$itemsassoc[$item][1]][5]>0 && !isset($teacherid)) || isset($hiddenitems[$item]))) {  //hide link and grey if not current
 					$colors[$k] = '#ccc';
 					$assess[$moday][$k]['color'] = '#ccc';
 				}
@@ -754,7 +715,7 @@ foreach ($itemsimporder as $item) {
 				$colors[$k] = $byid['F'.$datetype.$itemsassoc[$item][1]][2];
 				$assess[$moday][$k] = $byid['F'.$datetype.$itemsassoc[$item][1]][3];
 				$names[$k] = $byid['F'.$datetype.$itemsassoc[$item][1]][4];
-				if (($byid['F'.$datetype.$itemsassoc[$item][1]][5]>0 && !isset($teacherid)) || isset($hiddenitems[$item])) {
+				if (!$editingon && (($byid['F'.$datetype.$itemsassoc[$item][1]][5]>0 && !isset($teacherid)) || isset($hiddenitems[$item]))) {
 					$colors[$k] = '#ccc';
                     $assess[$moday][$k]['color'] = '#ccc';
 				}
@@ -776,14 +737,16 @@ foreach ($itemsimporder as $item) {
 				}
 				$assess[$moday][$k] = $byid['I'.$datetype.$itemsassoc[$item][1]][3];
 				$names[$k] = $byid['I'.$datetype.$itemsassoc[$item][1]][4];
-				if (($greyitems[$item]&$byid['I'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
-					$colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-					unset($assess[$moday][$k]['id']);
-				} else if (isset($hiddenitems[$item])) {
-                    $colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-                }
+				if (!$editingon) {
+					if (($greyitems[$item]&$byid['I'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+						unset($assess[$moday][$k]['id']);
+					} else if (isset($hiddenitems[$item])) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+					}
+				}
 				$k++;
 			}
 		}
@@ -799,14 +762,16 @@ foreach ($itemsimporder as $item) {
 				$colors[$k] = $byid['L'.$datetype.$itemsassoc[$item][1]][2];
 				$assess[$moday][$k] = $byid['L'.$datetype.$itemsassoc[$item][1]][3];
 				$names[$k] = $byid['L'.$datetype.$itemsassoc[$item][1]][4];
-				if (($greyitems[$item]&$byid['L'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
-					$colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-					unset($assess[$moday][$k]['id']);
-				} else if (isset($hiddenitems[$item])) {
-                    $colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-                }
+				if (!$editingon) {
+					if (($greyitems[$item]&$byid['L'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+						unset($assess[$moday][$k]['id']);
+					} else if (isset($hiddenitems[$item])) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+					}
+				}
 				$k++;
 			}
 		}
@@ -822,14 +787,16 @@ foreach ($itemsimporder as $item) {
 				$colors[$k] = $byid['D'.$datetype.$itemsassoc[$item][1]][2];
 				$assess[$moday][$k] = $byid['D'.$datetype.$itemsassoc[$item][1]][3];
 				$names[$k] = $byid['D'.$datetype.$itemsassoc[$item][1]][4];
-				if (($greyitems[$item]&$byid['D'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
-					$colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-					unset($assess[$moday][$k]['id']);
-				} else if (isset($hiddenitems[$item])) {
-                    $colors[$k] = '#ccc';
-					$assess[$moday][$k]['color'] = '#ccc';
-                }
+				if (!$editingon) {
+					if (($greyitems[$item]&$byid['D'.$datetype.$itemsassoc[$item][1]][5])>0 && !isset($teacherid)) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+						unset($assess[$moday][$k]['id']);
+					} else if (isset($hiddenitems[$item])) {
+						$colors[$k] = '#ccc';
+						$assess[$moday][$k]['color'] = '#ccc';
+					}
+				}
 				$k++;
 			}
 		}

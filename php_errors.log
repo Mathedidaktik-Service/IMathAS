@@ -49,3 +49,8 @@
 [07-Jan-2026 19:54:20 Europe/Berlin] PHP Notice:  Undefined index: listperpage in /var/www/html/IMathAS/validate.php on line 421
 [07-Jan-2026 19:54:20 Europe/Berlin] PHP Notice:  Undefined index: hasuserimg in /var/www/html/IMathAS/validate.php on line 423
 [07-Jan-2026 19:54:20 Europe/Berlin] PHP Notice:  Undefined index: FCMtoken in /var/www/html/IMathAS/validate.php on line 429
+[15-Jul-2026 12:59:59 Europe/Berlin] PHP Notice:  Undefined index: lastemail in /var/www/html/IMathAS/validate.php on line 469
+[15-Jul-2026 12:59:59 Europe/Berlin] PHP Notice:  Undefined index: specialrights in /var/www/html/IMathAS/validate.php on line 481
+[15-Jul-2026 12:59:59 Europe/Berlin] PHP Notice:  Undefined index: listperpage in /var/www/html/IMathAS/validate.php on line 501
+[15-Jul-2026 12:59:59 Europe/Berlin] PHP Notice:  Undefined index: hasuserimg in /var/www/html/IMathAS/validate.php on line 503
+[15-Jul-2026 12:59:59 Europe/Berlin] PHP Notice:  Undefined index: FCMtoken in /var/www/html/IMathAS/validate.php on line 509

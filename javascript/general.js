@@ -569,15 +569,16 @@ function initeditor(edmode,edids,css,inline,setupfunction,extendsetup){
 		selector: selectorstr,
 		inline: inlinemode,
 		license_key: 'gpl',
-		cache_suffix: '?v=011526',
-		plugins: "lists advlist autolink image charmap anchor searchreplace code link media table rollups asciimath asciisvg attach snippet emoticons accordion ableplayer",
+		cache_suffix: '?v=071126b',
+		plugins: "lists advlist autolink image charmap anchor searchreplace code link media table rollups asciimath asciisvg attach snippet emoticons accordion ableplayer drawing mathquill" + (usertype>0?" courselink":""),
 		menubar: false,
 		toolbar1: "myEdit myInsert styles | bold italic underline subscript superscript | forecolor backcolor | snippet code",
-		toolbar2: " alignleft aligncenter alignright | bullist numlist outdent indent  | attach link unlink image | table | asciimath asciimathcharmap asciisvg | saveclose",
-		extended_valid_elements : 'iframe[src|width|height|name|align|allowfullscreen|frameborder|style|class],param[name|value],@[sscr],asvg[sscr|src|type|style]',
+		toolbar2: " alignleft aligncenter alignright | bullist numlist outdent indent  | attach link unlink image | table | asciimath mathquill asciisvg | saveclose",
+		extended_valid_elements : 'iframe[src|width|height|name|align|allowfullscreen|frameborder|style|class],param[name|value],@[sscr],asvg[sscr|src|type|style|alt]',
 		custom_elements: 'asvg',
         content_css : staticroot+(cssmode==1?'/assessment/mathtest.css,':'/imascore.css,')+staticroot+'/themes/'+coursetheme,
 		AScgiloc : imasroot+'/filter/graph/svgimg.php',
+		mathquill_latex_endpoint : AMTcgiloc,
 		convert_urls: false,
 		file_picker_callback: filePickerCallBackFunc,
 		file_picker_types: 'file image',
@@ -606,13 +607,14 @@ function initeditor(edmode,edids,css,inline,setupfunction,extendsetup){
 		resize: "both",
 		width: '100%',
 		height: 150,
-		content_style: "body {background-color: " + (coursetheme.match(/_dark/) ? "#000" : "#fff") + " !important;}",
+		content_style: "body.mce-content-body {background-color: " + (coursetheme.match(/_dark/) ? "#000" : "#fff") + " !important;}",
 		table_class_list: [{title: "None", value:''},
 			{title:"Gridded", value:"gridded"},
 			{title:"Gridded Centered", value:"gridded centered"}],
 		style_formats_merge: true,
 		snippet_list: (tinymceUseSnippets==1)?imasroot+'/tinymce8/getsnippets.php':false,
         autolink_pattern: /^(https?:\/\/|www\.)(.+)$/i,
+		text_patterns: false,
 		mobile: {
 			toolbar_mode: 'sliding'
 		},
@@ -761,7 +763,6 @@ const image_upload_handler = (blobInfo, progress, isattach) => new Promise((reso
   };
 
   xhr.onload = () => {
-	console.log(xhr);
     if (xhr.status === 403) {
       reject({ message: 'HTTP Error: ' + xhr.statusText, remove: true });
       return;
@@ -1135,7 +1136,7 @@ jQuery(function() {
 	if (m = window.location.href.match(/course\.php.*cid=(\d+).*folder=([\d\-]+)/)) {
 		window.sessionStorage.setItem('btf'+m[1], m[2]);
 	}
-	jQuery('a[href*="course.php"]').each(function(i,el) {
+	jQuery('a[href*="course.php"]:not(.courselink)').each(function(i,el) {
 		if (!el.href.match(/folder=/) && (m=el.href.match(/cid=(\d+)/))) {
 			var btf = window.sessionStorage.getItem('btf'+m[1]) || '';
 			if (btf !== '') {
@@ -1161,7 +1162,12 @@ function convertheic(href, divid) {
 	})
   .then(function(conversionResult) {
     var url = URL.createObjectURL(conversionResult);
-    document.getElementById(divid).innerHTML = '<img src="' + url + '" onclick="rotateimg(this)">';
+    var container = document.getElementById(divid);
+    container.textContent = '';
+    var img = document.createElement('img');
+    img.src = url;
+    img.addEventListener('click', function() { rotateimg(img); });
+    container.appendChild(img);
   })
   .catch(function(e) {
     console.log(e);
@@ -1175,7 +1181,12 @@ function convertheic2(href, divid) {
 	})
   .then(function(conversionResult) {
     var url = URL.createObjectURL(conversionResult);
-    document.getElementById(divid).innerHTML = '<img src="' + url + '" onclick="rotateimg(this)">';
+    var container = document.getElementById(divid);
+    container.textContent = '';
+    var img = document.createElement('img');
+    img.src = url;
+    img.addEventListener('click', function() { rotateimg(img); });
+    container.appendChild(img);
   })
   .catch(function(e) {
     console.log(e);
@@ -1441,17 +1452,27 @@ jQuery.fn.isolatedScroll = function() {
 jQuery(document).ready(function($) {
 	var fixedonscrollel = $('.fixedonscroll');
 	var initialtop = [];
+	var fixedbottom = [];
 	for (var i=0;i<fixedonscrollel.length;i++) {
 		initialtop[i] = $(fixedonscrollel[i]).offset().top;
 		if ($(fixedonscrollel[i]).height()>$(window).height()) { //skip if element is taller than window
 			initialtop[i] = -1;
+		}
+		if (fixedonscrollel[i].hasAttribute('data-fixedend')) {
+			const refel = $('#'+fixedonscrollel[i].getAttribute('data-fixedend'));
+			fixedbottom[i] = refel.offset().top + refel.outerHeight() - 50;
+		} else {
+			fixedbottom[i] = 0;
+		}
+		if ($(fixedonscrollel[i]).next(".fixedonscrollpad").length == 0) {
+			$(fixedonscrollel[i]).after('<div class="fixedonscrollpad"></div>');
 		}
 	}
 	if (fixedonscrollel.length>0) { // && $(fixedonscrollel[0]).css('float')=="left") {
 		$(window).scroll(function() {
 			var winscrolltop = $(window).scrollTop();
 			for (var i=0;i<fixedonscrollel.length;i++) {
-				if (winscrolltop > initialtop[i] && initialtop[i]>0) {
+				if (winscrolltop > initialtop[i] && initialtop[i]>0 && (fixedbottom[i] == 0 || winscrolltop < fixedbottom[i])) {
 					$(fixedonscrollel[i]).next(".fixedonscrollpad").height($(fixedonscrollel[i]).height() + 5);
 					$(fixedonscrollel[i]).css('position','fixed').css('top','5px').attr("data-fixed",true);
 				} else {
@@ -1461,6 +1482,19 @@ jQuery(document).ready(function($) {
 			}
 		});
 	}
+
+	$(".stickyonscroll").each(function(i, el) {
+		var $el = $(el);
+		var parentBg = $el.parent().css('background-color');
+		// walk up if parent is transparent
+		var $ancestor = $el.parent();
+		while (parentBg === 'rgba(0, 0, 0, 0)' || parentBg === 'transparent') {
+			$ancestor = $ancestor.parent();
+			if (!$ancestor.length) break;
+			parentBg = $ancestor.css('background-color');
+		}
+		$el.css('background-color', parentBg);
+	});
 });
 
 
@@ -1483,7 +1517,7 @@ function randID() {
 }
 
 function setupToggler(base) {
-	$(base).find("*[data-toggler]:not(.togglerinit)").each(function() {
+	$(base).find("*[data-toggler]:not(.togglerinit)").not("#curqtbl *").each(function() {
 		var id = $(this).attr("id") || randID();
 		if ($(this).prop('tagName') === 'IFRAME') {
 			$(this).css("display", "block");
@@ -1830,6 +1864,12 @@ function setActiveTab(el) {
 	jQuery(el).closest(".tabwrap").find(".tabpanel").hide().attr("aria-hidden",true);
 	var tabpanelid = el.getAttribute('aria-controls');
 	jQuery(el).closest(".tabwrap").find("#"+tabpanelid).show().attr("aria-hidden",false);
+	var curtop = $("#"+tabpanelid).offset().top - jQuery(el).closest(".tablist").height();
+	if (curtop < window.scrollY) {
+		window.scrollTo({
+			top: curtop
+		});
+	}
 }
 
 function setCookie(name, value, expires) {
@@ -2080,7 +2120,10 @@ function doImageUploadResize(el, callback) {
                 width = Math.round(img.width * ratio);
                 height = Math.round(img.height * ratio);
                 prefix = 'resized_';
-            }
+            } else if (originalFile.type === 'image/gif' || originalFile.type === 'image/png') {
+				callback(el, false);
+				return;
+			}
 
             canvas.width = width;
             canvas.height = height;

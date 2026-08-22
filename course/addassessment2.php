@@ -56,7 +56,8 @@ if (isset($_GET['id'])) {
 if (isset($_GET['id'])) {
 	$stm = $DBH->prepare("SELECT courseid FROM imas_assessments WHERE id=?");
 	$stm->execute(array(intval($_GET['id'])));
-	if ($stm->rowCount()==0 || $stm->fetchColumn(0) != $_GET['cid']) {
+	$row = $stm->fetch(PDO::FETCH_NUM);
+	if ($row === false || $row[0] != $_GET['cid']) {
 		echo "Invalid ID";
 		exit;
 	}
@@ -194,13 +195,13 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 		// Core options
 		if (!empty($_POST['copyfrom'])) { // copy options from another assessment
 			$fields = array('displaymethod','submitby','defregens','defregenpenalty',
-									'keepscore','defattempts','defpenalty','showscores','showans',
+									'keepscore','retakewait','defattempts','defpenalty','showscores','showans',
 									'viewingb','scoresingb','ansingb','gbcategory','caltag','shuffle',
 									'istutorial','noprint','showcat','allowlate','LPcutoff',
 									'timelimit','overtime_grace','overtime_penalty','password',
-									'reqscore','reqscoretype','reqscoreaid','showhints',
+									'reqscorejson','drilljson','showhints',
 									'msgtoinstr','eqnhelper','posttoforum','extrefs','showtips',
-									'cntingb','minscore','deffeedbacktext','tutoredit','exceptionpenalty','earlybonus',
+									'cntingb','minscore','deffeedbacktext','tutoredit','exceptionpenalty','exceptionpenaltyinterval','earlybonus',
 									'defoutcome','isgroup','groupsetid','groupmax','showwork','workcutoff');
 			$fieldlist = implode(',', $fields);
 			$stm = $DBH->prepare("SELECT $fieldlist FROM imas_assessments WHERE id=:id AND courseid=:cid");
@@ -237,7 +238,14 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				}
 			}
 		} else { // set using values selected
-			$toset['displaymethod'] = Sanitize::stripHtmlTags($_POST['displaymethod']);
+			// "Drill style" is presented in the UI as a Submission type option
+			// (since it forces submitby, similarly to how by_assessment/by_question
+			// do), but is still stored as a displaymethod under the hood
+			$isDrillChg = ($_POST['subtype'] === 'drill');
+			if ($isDrillChg) {
+				$_POST['subtype'] = 'by_question';
+			}
+			$toset['displaymethod'] = $isDrillChg ? 'drill' : Sanitize::stripHtmlTags($_POST['displaymethod']);
 
 			$toset['submitby'] = Sanitize::stripHtmlTags($_POST['subtype']);
 			$toset['defregens'] = Sanitize::onlyInt($_POST['defregens']);
@@ -253,7 +261,24 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			if (isset($_POST['keepscore'])) {
 				$toset['keepscore'] = Sanitize::simpleString($_POST['keepscore']);
 			}
+			if ($_POST['subtype'] == 'by_assessment') {
+				$toset['retakewait'] = Sanitize::onlyInt($_POST['retakewait'] ?? 0);
+			} else {
+				$toset['retakewait'] = 0;
+			}
 
+			if ($isDrillChg) {
+				// versions section is hidden for drill mode; use an effectively-unlimited
+				// regen cap instead, since drill auto-regenerates until the drill goal is met
+				$toset['defregens'] = 999;
+				$toset['defregenpenalty'] = 0;
+				$toset['drilljson'] = json_encode(array(
+					'style' => Sanitize::simpleString($_POST['drillstyle'] ?? 'time_maxcorrect'),
+					'n' => max(1, Sanitize::onlyInt($_POST['drilln'] ?? 10))
+				));
+			} else {
+				$toset['drilljson'] = '';
+			}
 
 			$toset['defattempts'] = Sanitize::onlyInt($_POST['defattempts']);
 			$defattemptpenalty_aftern = Sanitize::onlyInt($_POST['defattemptpenaltyaftern'] ?? 0);
@@ -287,7 +312,9 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 				$toset['caltag'] = 'use_name';
 			}
 			$toset['shuffle'] = Sanitize::onlyInt($_POST['shuffle']);
-			if (isset($_POST['sameseed']) && $_POST['subtype'] == 'by_assessment') { 
+			if (isset($_POST['sameseed']) && 
+				($_POST['subtype'] == 'by_assessment' || $toset['defregens'] == 1)
+			) { 
 				$toset['shuffle'] += 2;
 			}
 			if (isset($_POST['samever'])) { $toset['shuffle'] += 4;}
@@ -295,11 +322,17 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			$toset['noprint'] = empty($_POST['noprint']) ? 0 : 1;
             if (!empty($_POST['lockforassess']) && $_POST['subtype'] == 'by_assessment') {
                 $toset['noprint'] += 2;
-            } 
+            }
+            if (!empty($_POST['nodetailedsoln'])) {
+                $toset['noprint'] += 4;
+            }
 			$toset['showcat'] = empty($_POST['showcat']) ? 0 : 1;
 			$toset['showwork'] = Sanitize::onlyInt($_POST['showwork']);
             if (isset($_POST['showworktype'])) {
                 $toset['showwork'] += Sanitize::onlyInt($_POST['showworktype']);
+            }
+			if (isset($_POST['showworkonebox'])) {
+                $toset['showwork'] += Sanitize::onlyInt($_POST['showworkonebox']);
             }
             if (!empty($_POST['doworkcutoff'])) {
                 $toset['workcutoff'] = Sanitize::onlyInt($_POST['workcutoffval']);
@@ -340,19 +373,23 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 
 			$toset['password'] = trim(Sanitize::stripHtmlTags($_POST['assmpassword']));
 
-			$toset['reqscore'] = Sanitize::onlyInt($_POST['reqscore']);
-			if ($_POST['reqscoreshowtype']==-1 || $toset['reqscore']==0 || !isset($_POST['reqscoreaid'])) {
-				$toset['reqscore'] = 0;
-				$toset['reqscoretype'] = 0;
-				$toset['reqscoreaid'] = 0;
-			} else {
-				$toset['reqscoreaid'] = Sanitize::onlyInt($_POST['reqscoreaid']);
-				$toset['reqscoretype'] = 0;
-				if ($_POST['reqscoreshowtype']==1) {
-					$toset['reqscoretype'] |= 1;
+			$toset['reqscoretype'] = 0;
+			if ($_POST['reqscoreshowtype']==1) {
+				$toset['reqscoretype'] |= 1;
+			}
+			$toset['reqscorejson'] = '';
+			if ($_POST['reqscoreshowtype']!=-1 && !empty($_POST['reqscoreaid'])) {
+				$reqscorearr = [];
+				foreach ($_POST['reqscoreaid'] as $k=>$v) {
+					if (!empty($_POST['reqscore'][$k])) {
+						$reqscorearr[] = [intval($v), intval($_POST['reqscore'][$k]), intval($_POST['reqscorecalctype'][$k])];
+					}
 				}
-				if ($_POST['reqscorecalctype']==1) {
-					$toset['reqscoretype'] |= 2;
+				if (count($reqscorearr) == 1) {
+					$toset['reqscorejson'] = json_encode($reqscorearr[0]);
+				} else if (count($reqscorearr)>1) {
+					$logic = ($_POST['reqscoreandor'] == 0) ? '&' : '|';
+					$toset['reqscorejson'] = json_encode([$logic, $reqscorearr]);
 				}
 			}
 
@@ -404,6 +441,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 
 			$toset['tutoredit'] = Sanitize::onlyInt($_POST['tutoredit']);
 			$toset['exceptionpenalty'] = Sanitize::onlyInt($_POST['exceptionpenalty']);
+			$toset['exceptionpenaltyinterval'] = ($_POST['exceptionpenaltytype'] === 'increasing') ? Sanitize::onlyInt($_POST['exceptionpenaltyinterval']) : 0;
 			$toset['defoutcome'] = Sanitize::onlyInt($_POST['defoutcome']);
 
 			$toset['earlybonus'] = 0;
@@ -475,6 +513,16 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
       if (($introjson=json_decode($curassess['intro']))!==null) { //is json intro
         $introjson[0] = $toset['intro'];
         $toset['intro'] = json_encode($introjson);
+      }
+
+      if ($toset['displaymethod'] == 'drill' && !empty($curassess['drilljson'])) {
+        // preserve existing per-question display names
+        $olddrilljson = json_decode($curassess['drilljson'], true);
+        if (!empty($olddrilljson['dispnames'])) {
+          $newdrilljson = json_decode($toset['drilljson'], true);
+          $newdrilljson['dispnames'] = $olddrilljson['dispnames'];
+          $toset['drilljson'] = json_encode($newdrilljson);
+        }
       }
 
 			if (!$updategroupset) { // don't change group
@@ -685,6 +733,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 					$line['defregens'] = isset($CFG['AMS2']['defregens'])?$CFG['AMS2']['defregens']:20;
 					$line['defregenpenalty'] = isset($CFG['AMS2']['defregenpenalty'])?$CFG['AMS2']['defregenpenalty']:0;
 					$line['keepscore'] = isset($CFG['AMS2']['keepscore'])?$CFG['AMS2']['keepscore']:'best';
+					$line['retakewait'] = isset($CFG['AMS2']['retakewait'])?$CFG['AMS2']['retakewait']:0;
 					$line['defattempts'] = isset($CFG['AMS2']['defattempts'])?$CFG['AMS2']['defattempts']:3;
 					$line['defpenalty'] = isset($CFG['AMS']['defpenalty'])?$CFG['AMS']['defpenalty']:0;
 					$line['showscores'] = isset($CFG['AMS2']['showscores'])?$CFG['AMS2']['showscores']:'during';
@@ -716,14 +765,15 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
           $deffb = _("This assessment contains items that are not automatically graded.  Your grade may be inaccurate until your instructor grades these items.");
 					$line['tutoredit'] = isset($CFG['AMS']['tutoredit'])?$CFG['AMS']['tutoredit']:0;
 					$line['exceptionpenalty'] = isset($CFG['AMS']['exceptionpenalty'])?$CFG['AMS']['exceptionpenalty']:0;
+					$line['exceptionpenaltyinterval'] = isset($CFG['AMS']['exceptionpenaltyinterval'])?$CFG['AMS']['exceptionpenaltyinterval']:0;
 					$line['earlybonus'] = isset($CFG['AMS']['earlybonux'])?$CFG['AMS']['earlybonus']:0;
 					$line['defoutcome'] = 0;
 					$line['isgroup'] = isset($CFG['AMS']['isgroup'])?$CFG['AMS']['isgroup']:0;
 					$line['groupmax'] = isset($CFG['AMS']['groupmax'])?$CFG['AMS']['groupmax']:6;
 					$line['groupsetid'] = 0;
-					$line['reqscore'] = 0;
-          $line['reqscoreaid'] = 0;
                     $line['reqscoretype'] = 0;
+					$line['reqscorejson'] = '';
+					$line['drilljson'] = '';
                     $line['showcat'] = 0;
                     $line['timelimit'] = 0;
 					$taken = false;
@@ -813,13 +863,31 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
         $defregenpenalty = $line['defregenpenalty'];
 		$defregenpenalty_aftern = 1;
       }
-      if ($line['reqscoreaid']==0) {
+      if ($line['reqscorejson']=='') {
       	$reqscoredisptype=-1;
-      } else if ($line['reqscore']<0 || $line['reqscoretype']&1) {
+      } else if ($line['reqscoretype']&1) {
       	$reqscoredisptype=1;
       } else {
       	$reqscoredisptype=0;
       }
+	  $reqscoreandor = 0;
+	  if ($line['reqscorejson']=='') {
+		$line['reqscorejson'] = [];
+	  } else {
+		$line['reqscorejson'] = json_decode($line['reqscorejson'], true);
+		// normalize to an array of [aid,score,type] arrays
+		if (is_array($line['reqscorejson'][1])) { // has bool format ['&', [array of objects]]
+			$reqscoreandor = ($line['reqscorejson'][0] == '&') ? 0 : 1;
+			$line['reqscorejson'] = $line['reqscorejson'][1];
+		} else { // single format; make into an array
+			$line['reqscorejson'] = [$line['reqscorejson']];
+		}
+	  }
+	  if ($line['drilljson'] == '') {
+	  	$line['drilljson'] = ['style'=>'time_maxcorrect', 'n'=>10];
+	  } else {
+	  	$line['drilljson'] = json_decode($line['drilljson'], true);
+	  }
       if ($taken) {
           $page_isTakenMsg = "<p>This assessment has already been taken.  Modifying some settings will mess up those assessment attempts, and those inputs ";
           $page_isTakenMsg .=  "have been disabled.  If you want to change these settings, you should clear all existing assessment attempts</p>\n";

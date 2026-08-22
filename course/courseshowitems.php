@@ -3,6 +3,8 @@
 // (c) 2007 David Lippman
 require_once '../includes/loaditemshowdata.php';
 require_once "../includes/exceptionfuncs.php";
+require_once '../includes/reqscorefuncs.php';
+
 if (!isset($courseUIver) || $courseUIver > 1) {
     $addassess = 'addassessment2.php';
 } else {
@@ -789,53 +791,19 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
             }
             $nothidden = true;
             $showgreyedout = false;
-            if (abs($line['reqscore']) > 0 && $line['reqscoreaid'] > 0 && !$viewall && $line['enddate'] > $now
-                && (!isset($exceptions[$items[$i]]) || ($exceptions[$items[$i]]['waivereqscore']&1) == 0)
-                && empty($excused['A' . $line['reqscoreaid']])
-            ) {
-                if ($line['reqscore'] < 0 || $line['reqscoretype'] & 1) {
-                    $showgreyedout = true;
-                }
-                if (isset($line['reqscoreptsearned'])) {
-                    $ptsearned = $line['reqscoreptsearned'];
-                } else {
-                    if ($line['ver'] > 1) {
-                        $stm = $DBH->prepare("SELECT score FROM imas_assessment_records WHERE assessmentid=:assessmentid AND userid=:userid");
-                    } else {
-                        $stm = $DBH->prepare("SELECT bestscores FROM imas_assessment_sessions WHERE assessmentid=:assessmentid AND userid=:userid");
-                    }
-                    $stm->execute(array(':assessmentid' => $line['reqscoreaid'], ':userid' => $userid));
-                    if ($stm->rowCount() == 0) {
-                        $nothidden = false;
-                    } else {
-                        if ($line['ver'] > 1) {
-                            $ptsearned = $stm->fetchColumn(0);
-                        } else {
-                            $scores = explode(';', $stm->fetchColumn(0));
-                            $ptsearned = getpts($scores[0]);
-                        }
-                    }
-                }
-
-                if ($nothidden) {
-                    if ($line['reqscoretype'] & 2) { //using percent-based
-                        if ($line['reqscoreptsposs'] > 0 &&
-                            round(100 * $ptsearned / $line['reqscoreptsposs'], 1) + .02 < abs($line['reqscore'])) {
-                            $nothidden = false;
-                        }
-                    } else { //points based
-                        if (round($ptsearned, 1) + .02 < abs($line['reqscore'])) {
-                            $nothidden = false;
-                        }
-                    }
-                }
-            }
             $preReqNote = '';
-            if (abs($line['reqscore']) > 0 && $line['reqscoreaid'] > 0) {
-                $preReqNote = '<br/><span class="small">' . _('Prerequisite: ') . abs($line['reqscore']) . (($line['reqscoretype'] & 2) ? '%' : ' points');
-                $preReqNote .= _(' on ') . Sanitize::encodeStringForDisplay($line['reqscorename'] ?? '') . '</span>';
+            if ($line['reqscorejson'] !== '' && $line['enddate'] > $now
+                && (!isset($exceptions[$items[$i]]) || ($exceptions[$items[$i]]['waivereqscore']&1) == 0)
+            ) {
+                [$meetsPrereq, $prereqstr] = meetsReqScore(json_decode($line['reqscorejson'],true), true);
+                $preReqNote = '<br/><span class="small">' . _('Prerequisite: ') . Sanitize::encodeStringForDisplay($prereqstr) . '</span>';
+                if (!$viewall && !$meetsPrereq) {
+                    if ($line['reqscoretype'] & 1) {
+                        $showgreyedout = true;
+                    }
+                    $nothidden = false;
+                }
             }
-
             $excusedNote = '';
             if (!$canedit && !empty($excused['A' . $typeid])) {
                 $excusedNote .= '<br/><span class="small">' .
@@ -1280,11 +1248,12 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo filter("<div class=itemsum>{$line['text']}\n");
                 $stm = $DBH->prepare("SELECT id,description,filename FROM imas_instr_files WHERE itemid=:itemid");
                 $stm->execute(array(':itemid' => $typeid));
-                if ($stm->rowCount() > 0) {
+                $instrfilerows = $stm->fetchAll(PDO::FETCH_NUM);
+                if (count($instrfilerows) > 0) {
                     echo '<ul class="fileattachlist">';
                     $filenames = array();
                     $filedescr = array();
-                    while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+                    foreach ($instrfilerows as $row) {
                         $filenames[$row[0]] = $row[2];
                         $filedescr[$row[0]] = $row[1];
                     }
@@ -1329,11 +1298,12 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo filter("<div class=itemsum>{$line['text']}\n");
                 $stm = $DBH->prepare("SELECT id,description,filename FROM imas_instr_files WHERE itemid=:itemid");
                 $stm->execute(array(':itemid' => $typeid));
-                if ($stm->rowCount() > 0) {
+                $instrfilerows = $stm->fetchAll(PDO::FETCH_NUM);
+                if (count($instrfilerows) > 0) {
                     echo '<ul class="fileattachlist">';
                     $filenames = array();
                     $filedescr = array();
-                    while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+                    foreach ($instrfilerows as $row) {
                         $filenames[$row[0]] = $row[2];
                         $filedescr[$row[0]] = $row[1];
                     }
@@ -1641,7 +1611,7 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                 echo "<div class=title> ";
                 echo "<b><a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}\">" . Sanitize::encodeStringForDisplay($line['name']) . "</a></b>\n";
                 if (isset($newpostcnts[$line['id']]) && $newpostcnts[$line['id']] > 0) {
-                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&page=-1\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
+                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&type=new\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
                 }
                 if ($viewall) {
                     echo '<span class="instrdates">';
@@ -1751,7 +1721,7 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
 
                 echo "<div class=title><i> <b><a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}\">" . Sanitize::encodeStringForDisplay($line['name']) . "</a></b></i> ";
                 if (isset($newpostcnts[$line['id']]) && $newpostcnts[$line['id']] > 0) {
-                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&page=-1\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
+                    echo " <a href=\"../forums/thread.php?cid=$cid&forum={$line['id']}&type=new\" class=noticetext>", sprintf(_('New Posts (%s)'), $newpostcnts[$line['id']]), "</a>";
                 }
                 echo '<span class="instrdates">';
                 echo "<br/><i>$show </i>";
@@ -1801,9 +1771,8 @@ function showitems($items, $parent, $inpublic = false, $greyitems = 0)
                     $query .= "WHERE i_sgm.userid=:userid AND i_sg.groupsetid=:groupsetid";
                     $stm = $DBH->prepare($query);
                     $stm->execute(array(':userid' => $userid, ':groupsetid' => $line['groupsetid']));
-                    if ($stm->rowCount() > 0) {
-                        $wikigroupid = $stm->fetchColumn(0);
-                    } else {
+                    $wikigroupid = $stm->fetchColumn(0);
+                    if ($wikigroupid === false) {
                         $wikigroupid = 0;
                     }
                 }

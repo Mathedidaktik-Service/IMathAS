@@ -102,7 +102,7 @@ for ($i=0;$i<count($qorder);$i++) {
 }
 
 //Get question titles
-$qtitlebyid = array();
+$qtitle = array();
 $query = "SELECT iq.id,iqs.description FROM imas_questions AS iq,imas_questionset as iqs";
 $query .= " WHERE iq.questionsetid=iqs.id AND iq.assessmentid=:assessmentid";
 $stm = $DBH->prepare($query);
@@ -167,7 +167,7 @@ if ($viddata != '') {
 		} else {
 			$endtime[$i] = sectotime(abs(intval($data[$i][1])));
 		}
-		$skipseg[$i] = ($data[$i][1]<0);
+		$skipseg[$i] = (isset($data[$i][1]) && $data[$i][1]<0);
 		if (count($data[$i])>2) {  //is a question segment
 			$qn[$i] = $data[$i][2];
 			if (count($data[$i])>3) { //has followup

@@ -106,7 +106,8 @@
 	if ($gbItem != 'new') {
 		$stm = $DBH->prepare("SELECT courseid FROM imas_gbitems WHERE id=?");
 		$stm->execute(array($gbItem));
-		if ($stm->rowCount()==0 || $stm->fetchColumn(0) != $cid) {
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row === false || $row[0] != $cid) {
 			echo "Invalid ID";
 			exit;
 		}
@@ -186,19 +187,24 @@
         $assesssnappts = (float) Sanitize::onlyFloat($_POST['assesssnappts']);
 
 		//doing assessment snapshot
-		$stm = $DBH->prepare("SELECT ver,courseid FROM imas_assessments WHERE id=:assessmentid");
+		$stm = $DBH->prepare("SELECT ver,courseid,submitby FROM imas_assessments WHERE id=:assessmentid");
 		$stm->execute(array(':assessmentid'=>$assesssnapaid));
-		list($aver,$sourcecid) = $stm->fetch(PDO::FETCH_NUM);
+		list($aver,$sourcecid,$submitby) = $stm->fetch(PDO::FETCH_NUM);
 		if ($sourcecid !== $cid) { 
 			exit;
 		}
 		if ($aver == 1) {
-			$stm = $DBH->prepare("SELECT userid,bestscores FROM imas_assessment_sessions WHERE assessmentid=:assessmentid");
+			$stm = $DBH->prepare("SELECT ias.userid,ias.bestscores FROM imas_assessment_sessions AS ias
+				JOIN imas_students AS istu ON ias.userid=istu.userid
+			 	WHERE ias.assessmentid=:assessmentid AND istu.courseid=:cid");
 		} else {
-			$stm = $DBH->prepare("SELECT userid,score,scoreddata FROM imas_assessment_records WHERE assessmentid=:assessmentid");
+			$stm = $DBH->prepare("SELECT iar.userid,iar.score,iar.scoreddata FROM imas_assessment_records AS iar
+				JOIN imas_students AS istu ON iar.userid=istu.userid
+				WHERE iar.assessmentid=:assessmentid AND istu.courseid=:cid");
 		}
-		$stm->execute(array(':assessmentid'=>$assesssnapaid));
+		$stm->execute(array(':assessmentid'=>$assesssnapaid, ':cid'=>$cid));
 		while($row = $stm->fetch(PDO::FETCH_NUM)) {
+			$feedback = '';
 			if ($aver == 1) {
 				$sp = explode(';',$row[1]);
 				$sc = explode(',',$sp[0]);
@@ -234,6 +240,13 @@
                             }
                         }
                     }
+				} else if ($submitby == 'by_assessment' && $row[2] !== '') {
+					$data = json_decode(Sanitize::gzexpand($row[2]), true);
+					if ($data !== false) {
+						$feedback = sprintf(_('Attempt %d of %d total attempts'), 
+							$data['scored_version'] + 1, 
+							count($data['assess_versions']));
+					}
 				}
 			}
 
@@ -250,8 +263,9 @@
 			$query = "INSERT INTO imas_grades (gradetype,gradetypeid,userid,score,feedback) VALUES ";
 			$query .= "(:gradetype, :gradetypeid, :userid, :score, :feedback)";
 			$stm2 = $DBH->prepare($query);
-			$stm2->execute(array(':gradetype'=>'offline', ':gradetypeid'=>$gbItem, ':userid'=>$row[0], ':score'=>$score, ':feedback'=>''));
+			$stm2->execute(array(':gradetype'=>'offline', ':gradetypeid'=>$gbItem, ':userid'=>$row[0], ':score'=>$score, ':feedback'=>$feedback));
 		}
+
 	} else {
 		///regular submit
 		$stm = $DBH->prepare("SELECT userid FROM imas_students WHERE courseid=?");
@@ -401,7 +415,7 @@
     }
 
 	$placeinhead = "<script type=\"text/javascript\" src=\"$staticroot/javascript/DatePicker.js\"></script>";
-	$placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/addgrades.js?v=121925\"></script>";
+	$placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/addgrades.js?v=060226\"></script>";
 	$placeinhead .= '<style type="text/css">
 		 .suggestion_list
 		 {
@@ -580,15 +594,12 @@
 			echo "selected=1 ";
 		}
 		echo ">Default</option>\n";
-		if ($stm->rowCount()>0) {
-			while ($row = $stm->fetch(PDO::FETCH_NUM)) {
-				printf('<option value="%d" ', Sanitize::encodeStringForDisplay($row[0]));
-				if ($gbcat==$row[0]) {
-					echo "selected=1 ";
-				}
-				printf(">%s</option>\n", Sanitize::encodeStringForDisplay($row[1]));
+		while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+			printf('<option value="%d" ', Sanitize::encodeStringForDisplay($row[0]));
+			if ($gbcat==$row[0]) {
+				echo "selected=1 ";
 			}
-
+			printf(">%s</option>\n", Sanitize::encodeStringForDisplay($row[1]));
 		}
 		echo "</select></span><br class=form>\n";
 
@@ -660,8 +671,9 @@
 	if ($rubric != 0) {
 		$stm = $DBH->prepare("SELECT id,rubrictype,rubric FROM imas_rubrics WHERE id=:id");
 		$stm->execute(array(':id'=>$rubric));
-		if ($stm->rowCount()>0) {
-			echo printrubrics(array($stm->fetch(PDO::FETCH_NUM)));
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
+			echo printrubrics(array($row));
 		}
 	}
 ?>

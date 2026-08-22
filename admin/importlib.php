@@ -39,8 +39,9 @@ function parseqs($file,$touse,$rights) {
 		$toundel = array();
 		$stm = $DBH->prepare("SELECT id,adddate,lastmoddate,deleted FROM imas_questionset WHERE uniqueid=:uniqueid");
 		$stm->execute(array(':uniqueid'=>$qd['uqid']));
-		if ($stm->rowCount()>0) {
-			list($qsetid, $adddate, $lastmoddate, $deleted) = $stm->fetch(PDO::FETCH_NUM);
+		$row = $stm->fetch(PDO::FETCH_NUM);
+		if ($row !== false) {
+			list($qsetid, $adddate, $lastmoddate, $deleted) = $row;
 			$exists = true;
 		} else {
 			$exists = false;
@@ -103,10 +104,10 @@ function parseqs($file,$touse,$rights) {
 			return $qsetid;
 		} else {
 			$importuid = '';
-			if ($qd['uqid']=='0') {
+			if (empty($qd['uqid'])) {
 				$importuid = $qd['uqid'];
 				$mt = microtime();
-				$qd['uqid'] = substr($mt,11).substr($mt,2,1).str_pad($qn,5,0,STR_PAD_LEFT);
+				$qd['uqid'] = substr($mt,11).substr($mt,2,1).str_pad($qn,5,"0",STR_PAD_LEFT);
 			}
 			if (!empty($qd['qimgs'])) {
 				$hasimg = 1;
@@ -172,6 +173,7 @@ function parseqs($file,$touse,$rights) {
 	}
 
 	$line = '';
+	$qids = [];
 	while ((!$nogz || !feof($handle)) && ($nogz || !gzeof($handle))) {
 		if ($nogz) {
 			$line = rtrim(fgets($handle, 4096));
@@ -264,13 +266,15 @@ function parseqs($file,$touse,$rights) {
 	} else {
 		gzclose($handle);
 	}
-	foreach($qdata as $k=>$val) {
-		$qdata[$k] = rtrim($val);
-	}
-	if (in_array($qdata['qid'],$touse)) {
-		$qid = writeq($qdata,$rights,$qnum);
-		if ($qid!==false) {
-			$qids[$qdata['qid']] = $qid;
+	if (!empty($qdata)) {
+		foreach($qdata as $k=>$val) {
+			$qdata[$k] = rtrim($val);
+		}
+		if (in_array($qdata['qid'],$touse)) {
+			$qid = writeq($qdata,$rights,$qnum);
+			if ($qid!==false) {
+				$qids[$qdata['qid']] = $qid;
+			}
 		}
 	}
 	return $qids;
@@ -289,6 +293,7 @@ function parselibs($file) {
 		exit;
 	}
 	$line = '';
+	$libitems = [];
 	while (((!$nogz || !feof($handle)) && ($nogz || !gzeof($handle))) && $line!="START QUESTION") {
 		if ($nogz) {
 			$line = rtrim(fgets($handle, 4096));
@@ -464,7 +469,7 @@ if ($myrights < 100) {
 				$libs[$libid] = $DBH->lastInsertId();
 				$newl++;
 			}
-			if (isset($libs[$libid])) {
+			if (isset($libs[$libid]) && !empty($libitems[$libid])) {
 				if ($touse=='') {$touse = $libitems[$libid];} else if (isset($libitems[$libid])) {$touse .= ','.$libitems[$libid];}
 			}
 		}
@@ -536,16 +541,18 @@ if ($myrights < 100) {
 					}
 				}
 
-				$qidlist = explode(',',$libitems[$libid]);
-				foreach ($qidlist as $qid) {
-					if (isset($qids[$qid]) && (array_search($qids[$qid],$deletedli)!==false)) {
-						$stm = $DBH->prepare("UPDATE imas_library_items SET ownerid=:ownerid,lastmoddate=:now,deleted=0 WHERE libid=:libid AND qsetid=:qsetid");
-						$stm->execute(array(':libid'=>$libs[$libid], ':qsetid'=>Sanitize::onlyInt($qids[$qid]), ':ownerid'=>$userid, ':now'=>$now));
-						$newli += count($deletedli);
-					} else if (isset($qids[$qid]) && (array_search($qids[$qid],$existingli)===false)) {
-						$stm = $DBH->prepare("INSERT INTO imas_library_items (libid,qsetid,ownerid,lastmoddate) VALUES (:libid, :qsetid, :ownerid, :now)");
-						$stm->execute(array(':libid'=>$libs[$libid], ':qsetid'=>Sanitize::onlyInt($qids[$qid]), ':ownerid'=>$userid, ':now'=>$now));
-						$newli++;
+				if (!empty($libitems[$libid])) {
+					$qidlist = explode(',',$libitems[$libid]);
+					foreach ($qidlist as $qid) {
+						if (isset($qids[$qid]) && (array_search($qids[$qid],$deletedli)!==false)) {
+							$stm = $DBH->prepare("UPDATE imas_library_items SET ownerid=:ownerid,lastmoddate=:now,deleted=0 WHERE libid=:libid AND qsetid=:qsetid");
+							$stm->execute(array(':libid'=>$libs[$libid], ':qsetid'=>Sanitize::onlyInt($qids[$qid]), ':ownerid'=>$userid, ':now'=>$now));
+							$newli += count($deletedli);
+						} else if (isset($qids[$qid]) && (array_search($qids[$qid],$existingli)===false)) {
+							$stm = $DBH->prepare("INSERT INTO imas_library_items (libid,qsetid,ownerid,lastmoddate) VALUES (:libid, :qsetid, :ownerid, :now)");
+							$stm->execute(array(':libid'=>$libs[$libid], ':qsetid'=>Sanitize::onlyInt($qids[$qid]), ':ownerid'=>$userid, ':now'=>$now));
+							$newli++;
+						}
 					}
 				}
 				unset($existingli);

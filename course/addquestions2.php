@@ -6,6 +6,7 @@
 require_once "../init.php";
 require_once "../includes/htmlutil.php";
 require_once "../includes/TeacherAuditLog.php";
+require_once "../includes/viddatautil.php";
 
 /*** pre-html data manipulation, including function code *******/
 
@@ -33,10 +34,10 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 
 	$cid = Sanitize::courseId($_GET['cid']);
 	$aid = Sanitize::onlyInt($_GET['aid']);
-	$stm = $DBH->prepare("SELECT courseid,ver,submitby,defpoints,name,intro,showhints,showwork,itemorder,displaymethod FROM imas_assessments WHERE id=?");
+	$stm = $DBH->prepare("SELECT courseid,ver,submitby,defpoints,name,intro,showhints,showwork,itemorder,displaymethod,defregens,defattempts,drilljson FROM imas_assessments WHERE id=?");
 	$stm->execute(array($aid));
 	$row = $stm->fetch(PDO::FETCH_ASSOC);
-	if ($row === null || $row['courseid'] != $cid) {
+	if ($row === false || $row['courseid'] != $cid) {
 		echo _("Invalid ID");
 		exit;
 	} else if ($row['ver'] > 1) {
@@ -51,7 +52,21 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
     $assessmentname = $row['name'];
     $displaymethod = $row['displaymethod'];
     $itemorder = $row['itemorder'];
+	$rawintro = $row['intro'];
     $row['showwork'] = ($row['showwork'] & 3);
+	$showtimewarning = ($row['defattempts'] > 1 || ($submitby=='by_question' && $row['defregens'] > 1));
+
+	$drillDispNames = array();
+	if ($displaymethod == 'drill' && !empty($row['drilljson'])) {
+		$drilljson = json_decode($row['drilljson'], true);
+		if (!empty($drilljson['dispnames']) && is_array($drilljson['dispnames'])) {
+			foreach ($drilljson['dispnames'] as $qkey => $dispname) {
+				// keys are "qn<id>", matching the pts/extracredit convention, so
+				// json_encode/JS never mistake this map for a numerically-indexed array
+				$drillDispNames[$qkey] = Sanitize::encodeStringForDisplay($dispname);
+			}
+		}
+	}
 
 	if (isset($_GET['grp'])) { $_SESSION['groupopt'.$aid] = Sanitize::onlyInt($_GET['grp']);}
 	if (isset($_GET['selfrom'])) {
@@ -97,34 +112,7 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 			} else {
 				$itemorder  = $row[0] . "," . implode(",",$qids);
 			}
-			$viddata = $row[1];
-			if ($viddata != '') {
-				$nextnum = 0;
-				if ($row[0]!='') {
-					foreach (explode(',', $row[0]) as $iv) {
-						if (strpos($iv,'|')!==false) {
-							$choose = explode('|', $iv);
-							$nextnum += $choose[0];
-						} else {
-							$nextnum++;
-						}
-					}
-				}
-				$numnew= count($checked);
-				$viddata = unserialize($viddata);
-				if (!isset($viddata[count($viddata)-1][1])) {
-					$finalseg = array_pop($viddata);
-				} else {
-					$finalseg = '';
-				}
-				for ($i=$nextnum;$i<$nextnum+$numnew;$i++) {
-					$viddata[] = array('','',$i);
-				}
-				if ($finalseg != '') {
-					$viddata[] = $finalseg;
-				}
-				$viddata = serialize($viddata);
-			}
+			$viddata = appendBlankVidSegments($row[0], count($checked), $row[1]);
 			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata WHERE id=:id");
 			$stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':id'=>$aid));
 
@@ -387,12 +375,13 @@ if (!(isset($teacherid))) { // loaded by a NON-teacher
 		var addqaddr = '$address';
         var assessver = '$aver';
 		</script>";
-    $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/addqsort2.js?v=021326\"></script>";
-    $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/qsearch.js?v=111925\"></script>";
+    $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/addqsort2.js?v=071026\"></script>";
+    $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/tablesorter.js\"></script>";
+	$placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/qsearch.js?v=062526\"></script>";
     $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/junkflag.js?v=021326\"></script>";
     $placeinhead .= "<script type=\"text/javascript\" src=\"$staticroot/javascript/DatePicker.js?v=080818\"></script>";
 	$placeinhead .= "<script type=\"text/javascript\">var JunkFlagsaveurl = '". $GLOBALS['basesiteurl'] . "/course/savelibassignflag.php';</script>";
-    $placeinhead .= "<link rel=\"stylesheet\" href=\"$staticroot/course/addquestions2.css?v=012426\" type=\"text/css\" />";
+    $placeinhead .= "<link rel=\"stylesheet\" href=\"$staticroot/course/addquestions2.css?v=062426\" type=\"text/css\" />";
     $placeinhead .= '<script>
         $(function() {
             if (window.top != window.self) {
@@ -494,7 +483,6 @@ if ($overwriteBody==1) {
         var curlibs = '<?php echo Sanitize::encodeStringForJavascript(implode(',',$searchin)); ?>';
         var cursearchtype = '<?php echo Sanitize::simpleString($searchtype); ?>';
 	</script>
-	<script type="text/javascript" src="<?php echo $staticroot ?>/javascript/tablesorter.js"></script>
 
 	<div class="breadcrumb"><?php echo $curBreadcrumb ?></div>
 
@@ -567,7 +555,7 @@ if ($overwriteBody==1) {
 ?>
     <form id="curqform" method="post" action="addquestions2.php?modqs=true&aid=<?php echo $aid ?>&cid=<?php echo $cid ?>"
       <?php if (count($jsarr)==0) echo ' style="display:none;"'; ?>
-    >
+    ><div class="stickyonscroll">
 <?php
 		if (!$beentaken) {
 			/*
@@ -581,25 +569,40 @@ if ($overwriteBody==1) {
 ?>
 
 		<?php echo _('Check:') ?> <a href="#" onclick="return chkAllNone('curqform','checked[]',true)">All</a> <a href="#" onclick="return chkAllNone('curqform','checked[]',false)"><?php echo _('None') ?></a>
+		<?php
+			echo '<span class="dropdown">';
+			echo ' <a tabindex=0 class="dropdown-toggle arrow-down" id="dropdownMenuWithsel" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">';
+			echo _('With Selected').'</a>';
+			echo '<ul class="dropdown-menu" role="menu" aria-labelledby="dropdownMenuWithsel">';
+			echo ' <li><a href="#" onclick="removeSelected();return false;">', _('Remove'), "</a></li>";
+			echo ' <li><a href="#" onclick="groupSelected();return false;">', _('Group'), "</a></li>";
+			echo ' <li><a href="#" onclick="if (confirm_textseg_dirty()) { modsettings();} return false;">',_('Change Settings'), "</a></li>";
+			echo '</ul></span>';
 
-		<?php echo _('With Selected:') ?> <button type="button" onclick="removeSelected()"><?php echo _('Remove'); ?></button>
-			<button type="button" onclick="groupSelected()" ><?php echo _('Group'); ?></button>
-            <button type="button" onclick="if (confirm_textseg_dirty()) { modsettings();}"><?php echo _("Change Settings"); ?></button>
-
-<?php
 		}
 ?>
 		<span id="submitnotice" class=noticetext></span>
+		</div>
 		<div id="curqtbl"></div>
 
 	</form>
-	<p><?php echo _('Assessment points total:') ?> <span id="pttotal"></span></p>
+	<p><?php echo _('Assessment points total:') ?> <span id="pttotal"></span><br>
+	   <?php echo _('Estimated average time:') ?> <span id="avgtimetotal"></span> <?php echo _('min'); ?>. 
+		<span class="nowrap" onmouseover="tipshow(this,'<?php echo _('95th percentile: 95&percnt; of past students would take this long or less to complete 1 try at each question') ?>')" onmouseout="tipout()">P<sub>95</sub>: <span id="p95timetotal"></span> <?php echo _('min'); ?>.</span>
+		<span id="avgtimemissing" class="small" style="display:none;"><br><em><?php echo _('Not all questions have time data yet, so this estimate will be inaccurate.');?></em></span>
+		<?php if ($showtimewarning) {
+			echo '<br><span class="small">'._('Your assessment allows multiple attempts or tries on questions, so keep in mind the estimate is for a single try at each question.').'</span>';
+		}?>
+		<br/>
+		
+	</p>
 	<?php if (!empty($introconvertmsg)) {echo $introconvertmsg;}?>
 	<script>
 		var itemarray = <?php echo json_encode($jsarr, JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE); ?>;
 		var beentaken = <?php echo ($beentaken) ? 1:0; ?>;
         var displaymethod = "<?php echo Sanitize::encodeStringForDisplay($displaymethod); ?>";
-        var lastitemhash = "<?php echo md5($itemorder); ?>";
+        var drillDispNames = <?php echo count($drillDispNames) ? json_encode($drillDispNames, JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE) : '{}'; ?>;
+        var lastitemhash = "<?php echo md5($itemorder . $rawintro); ?>";
 		var useed = <?php echo Sanitize::onlyInt($_SESSION['userprefs']['useed']);?>;
 		//$(refreshTable);
 		refreshTable();

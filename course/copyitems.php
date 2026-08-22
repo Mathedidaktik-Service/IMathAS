@@ -39,7 +39,7 @@ if (!(isset($teacherid))) {
 		$query .= " AND imas_teachers.userid=:userid AND imas_courses.id=:id";
 		$stm = $DBH->prepare($query);
 		$stm->execute(array(':userid'=>$userid, ':id'=>$ctc));
-		if ($stm->rowCount()==0) {
+		if ($stm->fetch() === false) {
 			$stm = $DBH->prepare("SELECT enrollkey,copyrights,termsurl FROM imas_courses WHERE id=:id");
 			$stm->execute(array(':id'=>$ctc));
 			list($ekey, $copyrights, $termsurl) = $stm->fetch(PDO::FETCH_NUM);
@@ -163,7 +163,8 @@ if (!(isset($teacherid))) {
 						$gb_cat_src = $DBH->prepare("SELECT id FROM imas_gbcats WHERE courseid=:courseid AND name=:name");
 					}
 					$gb_cat_src->execute(array(':courseid'=>$cid, ':name'=>$row['name']));
-					if ($gb_cat_src->rowCount()==0) {
+					$srcrow = $gb_cat_src->fetch(PDO::FETCH_NUM);
+					if ($srcrow === false) {
 						if ($gb_cat_ins===null) {
 							$query = "INSERT INTO imas_gbcats (courseid,name,scale,scaletype,chop,dropn,weight,hidden,calctype) VALUES ";
 							$query .= "(:courseid, :name, :scale, :scaletype, :chop, :dropn, :weight, :hidden, :calctype)";
@@ -173,7 +174,7 @@ if (!(isset($teacherid))) {
 							':chop'=>$row['chop'], ':dropn'=>$row['dropn'], ':weight'=>$row['weight'], ':hidden'=>$row['hidden'], ':calctype'=>$row['calctype']));
 						$gbcats[$row['id']] = $DBH->lastInsertId();
 					} else {
-						$rpid = $gb_cat_src->fetchColumn(0);
+						$rpid = $srcrow[0];
 						if ($gb_cat_upd===null) {
 							$query = "UPDATE imas_gbcats SET scale=:scale,scaletype=:scaletype,chop=:chop,dropn=:dropn,weight=:weight,hidden=:hidden,calctype=:calctype ";
 							$query .= "WHERE id=:id";
@@ -440,8 +441,8 @@ if (!(isset($teacherid))) {
 
 if (!isset($_GET['loadothers']) && !isset($_GET['loadothergroup'])) {
 $placeinhead = '<script src="'.$staticroot.'/javascript/copyitemslist.js?v=081125" type="text/javascript"></script>';
-$placeinhead .= '<script src="'.$staticroot.'/javascript/accessibletree.js?v=070625"></script>';
-$placeinhead .= '<link rel="stylesheet" href="'.$staticroot.'/javascript/accessibletree.css?v=070625" type="text/css" />';
+$placeinhead .= '<script src="'.$staticroot.'/javascript/accessibletree.js?v=071126"></script>';
+$placeinhead .= '<link rel="stylesheet" href="'.$staticroot.'/javascript/accessibletree.css?v=071126" type="text/css" />';
 
 require_once "../header.php";
 }

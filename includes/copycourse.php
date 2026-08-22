@@ -192,13 +192,14 @@ function copycourse($sourcecid, $name, $newUIver) {
 function copyassess($aid, $destcid) {
   global $DBH,$cid,$datesbylti,$convertAssessVer;
 
-  $stm = $DBH->prepare("SELECT id FROM imas_items WHERE itemtype='Assessment' AND typeid=:typeid");
+  $stm = $DBH->prepare("SELECT id,courseid FROM imas_items WHERE itemtype='Assessment' AND typeid=:typeid");
   $stm->execute(array(':typeid'=>$aid));
-  if ($stm->rowCount()==0) {
+  $row = $stm->fetch(PDO::FETCH_NUM);
+  if ($row === false) {
     echo sprintf("Error.  Assessment ID %s not found.", $aid);
     exit;
   }
-  $sourceitemid = $stm->fetchColumn(0);
+  list($sourceitemid, $sourcecid) = $row;
   $cid = $destcid;
 
   $stm = $DBH->prepare("SELECT itemorder,dates_by_lti,UIver FROM imas_courses WHERE id=:id");
@@ -206,6 +207,7 @@ function copyassess($aid, $destcid) {
   list($items,$datesbylti,$convertAssessVer) = $stm->fetch(PDO::FETCH_NUM);
   $items = unserialize($items);
   $newitem = copyitem($sourceitemid,array());
+  applyCourseLinkRemap($sourcecid);
   $stm = $DBH->prepare("SELECT typeid FROM imas_items WHERE id=:id");
   $stm->execute(array(':id'=>$newitem));
   $aid = $stm->fetchColumn(0);

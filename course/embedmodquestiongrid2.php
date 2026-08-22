@@ -24,11 +24,12 @@
 
 	if (isset($_POST['action'])) {
 		require_once "../includes/updateptsposs.php";
+		require_once "../includes/viddatautil.php";
 		if ($_POST['action'] == 'add') { //adding new questions
-			$stm = $DBH->prepare("SELECT itemorder,viddata,defpoints,ver FROM imas_assessments WHERE id=:id");
+			$stm = $DBH->prepare("SELECT itemorder,viddata,defpoints,ver,intro FROM imas_assessments WHERE id=:id");
 			$stm->execute(array(':id'=>$aid));
-            list($itemorder, $viddata, $defpoints, $aver) = $stm->fetch(PDO::FETCH_NUM);
-            if (!isset($_POST['lastitemhash']) || $_POST['lastitemhash'] !== md5($itemorder)) {
+            list($itemorder, $viddata, $defpoints, $aver, $intro) = $stm->fetch(PDO::FETCH_NUM);
+            if (!isset($_POST['lastitemhash']) || $_POST['lastitemhash'] !== md5($itemorder . $intro)) {
                 header('Content-Type: application/json; charset=utf-8');
                 echo '{"error": "Assessment content has changed since last loaded. Reload the page and try again"}';
                 exit;
@@ -36,15 +37,15 @@
 
 			$newitemorder = '';
             $points = '';
-			if (isset($_POST['addasgroup'])) {
+			if (!empty($_POST['addasgroup'])) {
 				$newitemorder = '1|0';
 			}
-			if (isset($_POST['addasgroup'])) {
+			if (!empty($_POST['addasgroup'])) {
 				$points = trim($_POST['points'.$_POST['firstqsetid']]);
 			}
 			foreach (explode(',',$_POST['qsetids']) as $k=>$qsetid) {
 				for ($i=0; $i<$_POST['copies'.$qsetid];$i++) {
-					if (!isset($_POST['addasgroup'])) {
+					if (empty($_POST['addasgroup'])) {
 						$points = trim($_POST['points'.$qsetid]);
 					}
 					$attempts = trim($_POST['attempts'.$qsetid]);
@@ -56,7 +57,7 @@
                     $showwork = intval($_POST['showwork'.$qsetid]);
 					if ($points=='' || $points==$defpoints) { $points = 9999;}
 					if ($attempts=='' || intval($attempts)==0) {$attempts = 9999;}
-					if ($points==9999 && isset($_POST['pointsforparts']) && $_POST['qparts'.$qsetid]>1 && !isset($_POST['addasgroup'])) {
+					if ($points==9999 && isset($_POST['pointsforparts']) && $_POST['qparts'.$qsetid]>1 && empty($_POST['addasgroup'])) {
 						$points = intval($_POST['qparts'.$qsetid]);
 					}
 					$query = "INSERT INTO imas_questions (assessmentid,points,attempts,showhints,showwork,penalty,regen,showans,questionsetid) ";
@@ -69,7 +70,7 @@
 					if ($newitemorder=='') {
 						$newitemorder = $qid;
 					} else {
-						if (isset($_POST['addasgroup'])) {
+						if (!empty($_POST['addasgroup'])) {
 							$newitemorder = $newitemorder . "~$qid";
 						} else {
 							$newitemorder = $newitemorder . ",$qid";
@@ -78,33 +79,8 @@
 				}
 			}
 
-			if ($viddata != '') {
-				$nextnum = 0;
-				if ($itemorder!='') {
-					foreach (explode(',', $itemorder) as $iv) {
-						if (strpos($iv,'|')!==false) {
-							$choose = explode('|', $iv);
-							$nextnum += $choose[0];
-						} else {
-							$nextnum++;
-						}
-					}
-				}
-				$numnew= substr_count($newitemorder,',')+1;
-				$viddata = unserialize($viddata);
-				if (!isset($viddata[count($viddata)-1][1])) {
-					$finalseg = array_pop($viddata);
-				} else {
-					$finalseg = '';
-				}
-				for ($i=$nextnum;$i<$nextnum+$numnew;$i++) {
-					$viddata[] = array('','',$i);
-				}
-				if ($finalseg != '') {
-					$viddata[] = $finalseg;
-				}
-				$viddata = serialize($viddata);
-			}
+			$numnew = substr_count($newitemorder,',')+1;
+			$viddata = appendBlankVidSegments($itemorder, $numnew, $viddata);
 
 			if ($itemorder == '') {
 				$itemorder = $newitemorder;
@@ -117,14 +93,15 @@
 			updatePointsPossible($aid, $itemorder, $defpoints);
 
 		} else if ($_POST['action'] == 'mod') { //modifying existing
-			$stm = $DBH->prepare("SELECT itemorder,defpoints,ver,intro FROM imas_assessments WHERE id=:id");
+			$stm = $DBH->prepare("SELECT itemorder,viddata,defpoints,ver,intro FROM imas_assessments WHERE id=:id");
 			$stm->execute(array(':id'=>$aid));
-			list($itemorder, $defpoints, $aver, $intro) = $stm->fetch(PDO::FETCH_NUM);
-            if (!isset($_POST['lastitemhash']) || $_POST['lastitemhash'] !== md5($itemorder)) {
+			list($itemorder, $viddata, $defpoints, $aver, $intro) = $stm->fetch(PDO::FETCH_NUM);
+            if (!isset($_POST['lastitemhash']) || $_POST['lastitemhash'] !== md5($itemorder . $intro)) {
                 header('Content-Type: application/json; charset=utf-8');
                 echo '{"error": "Assessment content has changed since last loaded. Reload the page and try again"}';
                 exit;
             }
+			$olditemorder = $itemorder;
 			$jsonintro = json_decode($intro,true);
 
 			
@@ -183,8 +160,11 @@
 					$intro = json_encode($jsonintro);
 				}
 			}
-			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,intro=:intro WHERE id=:id");
-			$stm->execute(array(':itemorder'=>$itemorder, ':intro'=>$intro, ':id'=>$aid));
+			if ($viddata != '') {
+				$viddata = remapVidData($olditemorder, $itemorder, $viddata);
+			}
+			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata,intro=:intro WHERE id=:id");
+			$stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':intro'=>$intro, ':id'=>$aid));
 
 			updatePointsPossible($aid, $itemorder, $defpoints);
         }
@@ -205,7 +185,7 @@
         list($jsarr,$existingqs) = getQuestionsAsJSON($cid, $aid);
         
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder)], 
+        echo json_encode(['itemarray'=>$jsarr, 'lastitemhash'=>md5($itemorder . $intro)], 
             JSON_HEX_QUOT|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_INVALID_UTF8_IGNORE);
         exit;
 
@@ -475,8 +455,9 @@
 			echo '</tbody></table>';
 			echo '<input type=hidden name="qsetids" value="'.Sanitize::encodeStringForDisplay($addqs).'" />';
 			echo '<input type=hidden name="action" value="add" />';
-
-			echo '<p><label><input type=checkbox name="addasgroup" value="1" onclick="chgisgrouped()"/> Add as a question group?</label></p>';
+			if ($cnt > 1) {
+				echo '<p><label><input type=checkbox name="addasgroup" value="1" onclick="chgisgrouped()"/> Add as a question group?</label></p>';
+			}
 			echo '<p><label><input type=checkbox name="pointsforparts" value="1" /> Set the points equal to the number of parts for multipart?</label></p>';
 			echo '<div class="submit"><input type="submit" value="'._('Add Questions').'"></div>';
 		}

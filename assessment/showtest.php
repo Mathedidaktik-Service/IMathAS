@@ -2,6 +2,7 @@
 //IMathAS:  Frontend of testing engine - manages administration of assessments
 //(c) 2006 David Lippman
 
+	$init_csrfp_scope = 'question';
 	require_once "../init.php";
 
 	//Look to see if a hook file is defined, and include if it is
@@ -63,7 +64,7 @@
 		//check dates, determine if review
 		$aid = Sanitize::onlyInt($_GET['id']);
 		$isreview = false;
-		$stm = $DBH->prepare("SELECT deffeedback,startdate,enddate,reviewdate,LPcutoff,shuffle,itemorder,password,avail,isgroup,groupsetid,deffeedbacktext,timelimit,courseid,istutorial,name,allowlate,displaymethod,id,reqscoreaid,reqscore,reqscoretype FROM imas_assessments WHERE id=:id");
+		$stm = $DBH->prepare("SELECT deffeedback,startdate,enddate,reviewdate,LPcutoff,shuffle,itemorder,password,avail,isgroup,groupsetid,deffeedbacktext,timelimit,courseid,istutorial,name,allowlate,displaymethod,id,reqscorejson FROM imas_assessments WHERE id=:id");
 		$stm->execute(array(':id'=>$aid));
 		$adata = $stm->fetch(PDO::FETCH_ASSOC);
 		$now = time();
@@ -167,8 +168,9 @@
 					if ($sa!='N') {
 						$stm = $DBH->prepare("SELECT id FROM imas_assessment_sessions WHERE userid=:userid AND assessmentid=:assessmentid ORDER BY id LIMIT 1");
 						$stm->execute(array(':userid'=>$userid, ':assessmentid'=>$aid));
-						if ($stm->rowCount()>0) {
-							echo '<p><a href="../course/gb-viewasid.php?cid='.$cid.'&asid='.$stm->fetchColumn(0).'" ';
+						$row = $stm->fetch(PDO::FETCH_NUM);
+						if ($row !== false) {
+							echo '<p><a href="../course/gb-viewasid.php?cid='.$cid.'&asid='.$row[0].'" ';
 							if (!$actas && $canuselatepass) {
 								echo ' onclick="return confirm(\''._('If you view this scored assignment, you will not be able to use a LatePass on it').'\');"';
 							}
@@ -181,15 +183,17 @@
 			exit;
 		}
 		//check reqscore
-		if ($isRealStudent && abs($adata['reqscore'])>0 && $adata['reqscoreaid']>0 && !$waivereqscore && !$isreview) {
+		if ($isRealStudent && $adata['reqscorejson']!='' && !$waivereqscore && !$isreview) {
 			$isBlocked = false;
+
+			$reqjson = json_decode($adata['reqscorejson'], true);
 
 			$query = "SELECT ias.bestscores,ia.ptsposs,ia.name FROM imas_assessments AS ia LEFT JOIN ";
 			$query .= "imas_assessment_sessions AS ias ON ias.assessmentid=ia.id AND ias.userid=:userid ";
 			$query .= "WHERE ia.id=:assessmentid";
 			$bestscores_stm = $DBH->prepare($query);
-			$bestscores_stm->execute(array(':assessmentid'=>$adata['reqscoreaid'], ':userid'=>$userid));
-			list($prereqscore,$reqscoreptsposs,$reqscorename) = $bestscores_stm->fetch(PDO::FETCH_NUM);
+			$bestscores_stm->execute(array(':assessmentid'=>$reqjson[0], ':userid'=>$userid));
+			list($prereqscore,$reqscoreptsposs,$reqscorename) = $bestscores_stm->fetch(PDO::FETCH_NUM) ?: [null,null,null];
 
 			if ($prereqscore === null) {
 				$isBlocked = true;
@@ -202,15 +206,15 @@
 				}
 				$isBlocked = false;
 
-				if ($adata['reqscoretype']&2) { //using percent-based
+				if ($reqjson[2]>0) { //using percent-based
 					if ($reqscoreptsposs==-1) {
 						require_once "../includes/updateptsposs.php";
-						$reqscoreptsposs = updatePointsPossible($adata['reqscoreaid']);
+						$reqscoreptsposs = updatePointsPossible($reqjson[0]);
 					}
-					if (round(100*$prereqscoretot/$reqscoreptsposs,1)+.02<abs($adata['reqscore'])) {
+					if (round(100*$prereqscoretot/$reqscoreptsposs,1)+.02<abs($reqjson[1])) {
 						$isBlocked = true;
 					}
-				} else if ($prereqscoretot+.02<abs($adata['reqscore'])) { //points based
+				} else if ($prereqscoretot+.02<abs($reqjson[1])) { //points based
 					$isBlocked = true;
 				}
 			}
@@ -219,8 +223,8 @@
 				echo '<h2>'._('You cannot start this assessment yet.').'</h2>';
 				echo '<p>';
 				printf(_('Access to this assessment requires a score of %d%s on %s'),
-					abs($adata['reqscore']),
-					($adata['reqscoretype']&2)?'%':_(' points'),
+					abs($reqjson[1]),
+					($reqjson[2]>0)?'%':_(' points'),
 					Sanitize::encodeStringForDisplay($reqscorename));
 				echo '</p>';
 				require_once "../footer.php";
@@ -360,8 +364,9 @@
 				$query .= "WHERE i_sgm.userid=:userid AND i_sg.groupsetid=:groupsetid";
 				$stm = $DBH->prepare($query);
 				$stm->execute(array(':userid'=>$userid, ':groupsetid'=>$adata['groupsetid']));
-				if ($stm->rowCount()>0) {
-					$stugroupid = $stm->fetchColumn(0);
+				$row = $stm->fetch(PDO::FETCH_NUM);
+				if ($row !== false) {
+					$stugroupid = $row[0];
 					$_SESSION['groupid'] = $stugroupid;
 				} else {
 					if ($adata['isgroup']==3) {
@@ -409,13 +414,14 @@
 				$query = "INSERT INTO imas_assessment_sessions (userid,assessmentid,questions,seeds,scores,attempts,lastanswers,starttime,bestscores,bestattempts,bestseeds,bestlastanswers,reviewscores,reviewattempts,reviewseeds,reviewlastanswers,agroupid,feedback,ver) VALUES ";
 				$cnt = 0;
 				$insval = array();
-				if ($stm->rowCount()>0) {
-					while ($row = $stm->fetch(PDO::FETCH_NUM)) {
+				$row = $stm->fetch(PDO::FETCH_NUM);
+				if ($row !== false) {
+					do {
 						if ($cnt>0) {$query .= ',';}
 						$query .= "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,2)";
 						array_push($insval, $row[0], $_GET['id'], $qlist, $seedlist, $scorelist, $attemptslist, $lalist, $starttime, $bestscorelist, $bestattemptslist, $bestseedslist, $bestlalist, $scorelist, $attemptslist, $reviewseedlist, $lalist, $stugroupid, $deffeedbacktext);
 						$cnt++;
-					}
+					} while ($row = $stm->fetch(PDO::FETCH_NUM));
 					$stm = $DBH->prepare($query);
 					$stm->execute($insval);
 				}
@@ -681,12 +687,13 @@
 	if ($testsettings['displaymethod']=='LivePoll') {
 		$stm = $DBH->prepare("SELECT curquestion,curstate,seed,startt FROM imas_livepoll_status WHERE assessmentid=:assessmentid");
 		$stm->execute(array(':assessmentid'=>$testsettings['id']));
-		if ($stm->rowCount()==0) {
+		$row = $stm->fetch(PDO::FETCH_ASSOC);
+		if ($row === false) {
 			$LPinf = array("curquestion"=>0, "curstate"=>0, "seed"=>0, "startt"=>0);
 			$stm = $DBH->prepare("INSERT INTO imas_livepoll_status (assessmentid,curquestion,curstate) VALUES (:assessmentid, :curquestion, :curstate) ON DUPLICATE KEY UPDATE curquestion=curquestion");
 			$stm->execute(array(':assessmentid'=>$testsettings['id'], ':curquestion'=>0, ':curstate'=>0));
 		} else {
-			$LPinf = $stm->fetch(PDO::FETCH_ASSOC);
+			$LPinf = $row;
 		}
 		$testsettings['shuffle'] = $testsettings['shuffle'] | 4; //force all students same seed
 		$hideAllHeaderNav = true; //hide header nav to expand real estate for questions / results
@@ -1169,15 +1176,16 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 		$placeinhead .= '<script src="'.$staticroot.'/javascript/ytapi.js?v=101817"></script>';
 	}
 	if ($testsettings['displaymethod'] == "LivePoll") {
-		$placeinhead = '<script src="https://'.$CFG['GEN']['livepollserver'].':3000/socket.io/socket.io.js"></script>';
-		$placeinhead .= '<script src="'.$staticroot.'/javascript/livepoll.js?v=102518"></script>';
+		$port = $CFG['GEN']['livepollserverport'] ?? '3000';
+		$placeinhead = '<script src="https://'.$CFG['GEN']['livepollserver'].':'.$port.'/socket.io/socket.io.js"></script>';
+		$placeinhead .= '<script src="'.$staticroot.'/javascript/livepoll.js?v=031126"></script>';
 		$livepollroom = $testsettings['id'].'-'.($_SESSION['isteacher'] ? 'teachers':'students');
 		$now = time();
 		if (isset($CFG['GEN']['livepollpassword'])) {
 			$livepollsig = base64_encode(hash('sha256',$livepollroom . $CFG['GEN']['livepollpassword'] . $now,true));
 		}
 		$placeinhead .= '<script type="text/javascript">
-				if (typeof io != "undefined") {livepoll.init("'.$CFG['GEN']['livepollserver'].'","'.$livepollroom.'","'.$now.'","'.$livepollsig.'");}
+				if (typeof io != "undefined") {livepoll.init("'.$CFG['GEN']['livepollserver'].':'.$port.'","'.$livepollroom.'","'.$now.'","'.$livepollsig.'");}
 				else { $(function() {$("#livepollqcontent").html("<p>' . _("Unable to connect to LivePoll Hub.  Please try again later.") . '</p>");});}</script>';
 
 		$placeinhead .= '<style type="text/css">
@@ -1313,8 +1321,8 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 					$thisuser = $_POST['user'.$i];
 					$stm = $DBH->prepare("SELECT id,agroupid FROM imas_assessment_sessions WHERE userid=:userid AND assessmentid=:assessmentid ORDER BY id LIMIT 1");
 					$stm->execute(array(':userid'=>$_POST['user'.$i], ':assessmentid'=>$testsettings['id']));
-					if ($stm->rowCount()>0) {
-						$row = $stm->fetch(PDO::FETCH_NUM);
+					$row = $stm->fetch(PDO::FETCH_NUM);
+					if ($row !== false) {
 						if ($row[1]>0) {
 							echo "<p>", _(sprintf('%s already has a group.  No change made', Sanitize::encodeStringForDisplay($thisusername))), "</p>";
 							$loginfo .= "$thisusername already in group. ";
@@ -1365,10 +1373,13 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 				$query .= "WHERE i_sgm.userid=:userid AND i_sg.groupsetid=:groupsetid";
 				$stm = $DBH->prepare($query);
 				$stm->execute(array(':userid'=>$userid, ':groupsetid'=>$testsettings['groupsetid']));
-				if ($stm->rowCount()==0) {
+				$row = $stm->fetch(PDO::FETCH_NUM);
+				if ($row === false) {
 					echo '<p>', _('Group error.  Please try reaccessing the assessment from the course page'), '</p>';
+					$agroupid = false;
+				} else {
+					$agroupid = $row[0];
 				}
-				$agroupid = $stm->fetchColumn(0);
 				$_SESSION['groupid'] = $agroupid;
 			} else {
 				$agroupid = $_SESSION['groupid'];
@@ -2414,8 +2425,8 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 				if (isset($CFG['GEN']['livepollpassword'])) {
 					$livepollsig = Sanitize::encodeUrlParam(base64_encode(hash('sha256',$tocheck . $CFG['GEN']['livepollpassword'] . $now,true)));
 				}
-
-				$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/qscored?aid='.$aid.'&qn='.$qn.'&user='.Sanitize::encodeUrlParam($userid).'&score='.Sanitize::encodeUrlParam($rawscore).'&now='.$now.'&la='.Sanitize::encodeUrlParam($arv).'&sig='.$livepollsig);
+				$port = $CFG['GEN']['livepollserverport'] ?? '3000';
+				$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/qscored?aid='.$aid.'&qn='.$qn.'&user='.Sanitize::encodeUrlParam($userid).'&score='.Sanitize::encodeUrlParam($rawscore).'&now='.$now.'&la='.Sanitize::encodeUrlParam($arv).'&sig='.$livepollsig);
 				echo '{success: true}';
 			//}
 			exit;
@@ -2436,8 +2447,8 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 			}
 			$regenstr = '';
 
-
-			$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/startq?aid='.$aid.'&qn='.$qn.'&seed='.$seed.'&startt='.$startt.'&now='.$now.'&sig='.$livepollsig);
+			$port = $CFG['GEN']['livepollserverport'] ?? '3000';
+			$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/startq?aid='.$aid.'&qn='.$qn.'&seed='.$seed.'&startt='.$startt.'&now='.$now.'&sig='.$livepollsig);
 
 			if ($r=='success') {
 				echo '{success: true}';
@@ -2473,8 +2484,8 @@ if (!isset($_REQUEST['embedpostback']) && empty($_POST['backgroundsaveforlater']
 			}
 			$stm = $DBH->prepare("UPDATE imas_livepoll_status SET curquestion=:curquestion,curstate=:curstate WHERE assessmentid=:assessmentid");
 			$stm->execute(array(':curquestion'=>$qn, ':curstate'=>$newstate, ':assessmentid'=>$aid));
-
-			$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':3000/stopq?aid='.$aid.'&qn='.$qn.'&newstate='.$newstate.'&now='.$now.'&sig='.$livepollsig);
+			$port = $CFG['GEN']['livepollserverport'] ?? '3000';
+			$r = file_get_contents('https://'.$CFG['GEN']['livepollserver'].':'.$port.'/stopq?aid='.$aid.'&qn='.$qn.'&newstate='.$newstate.'&now='.$now.'&sig='.$livepollsig);
 
 			if ($r=='success') {
 				echo '{success: true}';

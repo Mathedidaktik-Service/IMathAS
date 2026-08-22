@@ -22,7 +22,8 @@ array_push(
     'stuansready',
     'getstuans',
     'checkreqtimes',
-    'checkanswerformat'
+    'checkanswerformat',
+    'setupmathquillfillin'
 );
 
 function makenumberrequiretimes($arr) {
@@ -152,6 +153,8 @@ function gettwopointdata($str, $type, $xmin = null, $xmax = null, $ymin = null, 
         $code = 7;
     } else if ($type == 'ellipse' || $type == 'ellipserad') {
         $code = 7.2;
+    } else if ($type == 'rect' || $type == 'rectdim') {
+        $code = 5.9;
     } else if ($type == 'sin') {
         $code = 9.1;
     } else if ($type == 'cos') {
@@ -187,6 +190,8 @@ function gettwopointdata($str, $type, $xmin = null, $xmax = null, $ymin = null, 
             } else if ($type == 'circlerad') {
                 $pts[3] = sqrt(pow($pts[3] - $pts[1], 2) + pow($pts[4] - $pts[2], 2));
                 $outpt = array($pts[1], $pts[2], $pts[3]);
+            } else if ($type == 'rectdim') {
+                $outpt = array(abs($pts[3] - $pts[1]), abs($pts[4] - $pts[2]));
             } else if ($type == 'genexp' || $type == 'genlog') {
                 $pts[5] = ($pts[5] - $imgborder) / $pixelsperx + $xmin;
                 $pts[6] = ($h - $pts[6] - $imgborder) / $pixelspery + $ymin;
@@ -835,11 +840,15 @@ function stuansready($stu, $qn, $parts = null, $anstypes = null, $answerformat =
             if (!isset($stu[$qn][$v])) {
                 continue;
             }
-            if ($anstypes !== null && $answerformat !== null && $stu[$qn][$v] !== '') {
+            if ($anstypes !== null && $stu[$qn][$v] !== '') {
+                if (!isset($anstypes[$v])) {
+                    // treat single anstype as type for this part 
+                    $anstypes[$v] = count($anstypes)==1 ? ($anstypes[0] ?? '') : '';
+                }
                 $thisaf = '';
-                if (is_array($answerformat) && !empty($answerformat[$v])) {
+                if ($answerformat !== null && is_array($answerformat) && !empty($answerformat[$v])) {
                     $thisaf = $answerformat[$v];
-                } else if (!is_array($answerformat)) {
+                } else if ($answerformat !== null && !is_array($answerformat)) {
                     $thisaf = $answerformat;
                 }
                 if (($anstypes[$v] == 'calculated' || $anstypes[$v] == 'number') && strpos($thisaf, 'checknumeric') !== false) {
@@ -850,7 +859,7 @@ function stuansready($stu, $qn, $parts = null, $anstypes = null, $answerformat =
                     if (!checkanswerformat($stu[$qn][$v], $thisaf)) {
                         continue;
                     }
-                } else if ($anstypes[$v] == 'ntuple' || $anstypes[$v] == 'calcntuple') {
+                } else if ($anstypes[$v] == 'ntuple' || $anstypes[$v] == 'calcntuple' || $anstypes[$v] == 'algntuple') {
                     $ntuples = parseNtuple($stu[$qn][$v], false, false);
                     if (!is_array($ntuples) || !isset($ntuples[0])) {
                         continue;
@@ -863,8 +872,30 @@ function stuansready($stu, $qn, $parts = null, $anstypes = null, $answerformat =
                             if (!is_numeric($pv)) {
                                 continue 2;
                             }
-                        } else if ($thisaf !== '') {
+                        } else if ($thisaf !== '' && $anstypes[$v] == 'calcntuple') {
                             if (!checkanswerformat($pv, $thisaf)) {
+                                continue 2;
+                            }
+                        }
+                    }
+                } else if ($anstypes[$v] == 'complexntuple' || $anstypes[$v] == 'calccomplexntuple') {
+                    $ntuples = parseNtuple($stu[$qn][$v], false, false, true);
+                    if (!is_array($ntuples) || !isset($ntuples[0])) {
+                        continue;
+                    }
+                    $checknumeric = (strpos($thisaf, 'checknumeric') !== false);
+                    foreach ($ntuples[0]['vals'] as $k=>$pv) {
+                        $cv = $ntuples[0]['cvals'][$k];
+                        if ($pv === '') {
+                            continue 2;
+                        } if (!is_array($cv) && $cv != 'oo' && $cv != '-oo') {
+                            continue 2;  
+                        } else if ($checknumeric) {
+                            if (!is_array($cv) || !is_numeric($cv[0]) || !is_numeric($cv[1])) {
+                                continue 2;
+                            }
+                        } else if ($thisaf !== '' && $anstypes[$v] == 'calccomplexntuple') {
+                            if (is_array($cv) && (!checkanswerformat($cv[0], $thisaf) || !checkanswerformat($cv[1], $thisaf))) {
                                 continue 2;
                             }
                         }
@@ -874,7 +905,8 @@ function stuansready($stu, $qn, $parts = null, $anstypes = null, $answerformat =
             //echo $stu[$qn][$v];
             if ($anstypes !== null && ($anstypes[$v] === 'matrix' || $anstypes[$v] === 'calcmatrix')) {
                 if ($stu[$qn][$v] === '') { continue; }
-                $matparts = explode('|', $stu[$qn][$v]);
+                $matparts = parseMatrixToArray($stu[$qn][$v])[0];
+                if ($matparts === false) { continue; }
                 if (in_array('', $matparts)) { continue; }
                 if (in_array('NaN', $matparts)) { continue; }
                 if ($anstypes[$v] === 'matrix') {
@@ -949,7 +981,7 @@ function checkreqtimes($tocheck,$rtimes) {
 		for ($i=0;$i < count($list);$i+=2) {
 			if ($list[$i]=='') {continue;}
 			if (!isset($list[$i+1]) ||
-			   (strlen($list[$i+1])<2 && $list[$i]!='ignore_case' && $list[$i]!='ignore_commas' && $list[$i]!='ignore_symbol')) {
+			   (strlen($list[$i+1])<2 && $list[$i]!='ignore_case' && $list[$i]!='ignore_commas' && $list[$i]!='ignore_symbol' && $list[$i]!='ignore_spaces')) {
 				if ($myrights>10) {
 					echo "Invalid requiretimes - check format";
 				}
@@ -1209,6 +1241,26 @@ function checkanswerformat($tocheck,$ansformats) {
 		}
 	}
 	return true;
+}
+
+function setupmathquillfillin($mqformat, $altformat) {
+    preg_match_all('/\[AB(\d+)\]/', $mqformat, $m1, PREG_PATTERN_ORDER);
+    preg_match_all('/\[AB(\d+)\]/', $altformat, $m2, PREG_PATTERN_ORDER);
+    if (empty($m1) || empty($m2)) {
+        echo 'setupmathquillfillin: both inputs must include matching [AB#] elements';
+        return '';
+    }
+    sort($m1[1]);
+    sort($m2[1]);
+    if ($m1[1] !== $m2[1]) {
+        echo 'setupmathquillfillin: both inputs must include matching [AB#] elements';
+        return '';
+    }
+    $mqformat = preg_replace('/\[AB(\d+)\]/', 'innertmpfield($1)', $mqformat);
+    $out = '<span class="mqinnerfillin"><span class="mqfillin-mq"></span>&nbsp;<span class="mqfillin-err"></span>';
+    $out .= '<span class="mqfillin-alt" data-form="'. Sanitize::encodeStringForDisplay($mqformat).'" style="display:none;">';
+    $out .= $altformat . '</span></span>';
+    return $out;
 }
 
 /** internal functions */

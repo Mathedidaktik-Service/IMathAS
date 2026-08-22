@@ -9,8 +9,121 @@
 if (isset($CFG['hooks']['actions'])) {
 	require_once $CFG['hooks']['actions'];
 }
+function obfuscateEmail(string $email): string {
+	$emailpts = explode('@', $email);
+	if (count($emailpts)!=2) {
+		return $email;
+	}
+    [$user, $domain] = $emailpts;
+	$domainpts = explode('.', $domain, 2);
+	if (count($domainpts)!=2) {
+		return $email;
+	}
+    [$domainName, $tld] = $domainpts;
+
+    $obfuscatedUser = substr($user, 0, 2) . str_repeat('*', max(0, strlen($user) - 3)) . (strlen($user)>2?substr($user, -1):'');
+    $obfuscatedDomain = substr($domainName, 0, 1) . str_repeat('*', max(1, strlen($domainName) - 1));
+
+    return "$obfuscatedUser@$obfuscatedDomain.$tld";
+}
 
 require_once "includes/sanitize.php";
+
+	// Handle passkey challenges (used during login and registration)
+	if (isset($_GET['action']) && $_GET['action'] == 'getPasskeyChallenge') {
+		header('Content-Type: application/json');
+		
+		$input = json_decode(file_get_contents('php://input'), true);
+		$passkeyusername = $input['username'] ?? '';
+
+		if ($passkeyusername === 'register') {
+			// Handle registration challenge - user must be logged in
+			require_once "init.php";
+			
+			if (empty($userid)) {
+				throw new Exception('Must be logged in to register a passkey');
+			}
+		} else {
+			$init_session_start = true;
+			require_once "init_without_validate.php";
+		}
+		require_once __DIR__ . '/includes/passkey.php';
+		
+		if (empty($passkeyusername)) {
+			echo json_encode(['success' => false, 'error' => 'Username required']);
+			exit;
+		}
+
+		try {
+			$rpId = parse_url($GLOBALS['basesiteurl'], PHP_URL_HOST);
+			$passkeyMgr = new PasskeyManager($rpId, isset($installname) ? $installname : 'IMathAS');
+			if ($passkeyusername === 'register') {
+				// Require fresh re-authentication (password + MFA if enabled) before
+				// issuing a registration challenge, so a briefly-unattended logged-in
+				// session can't be used to silently add persistent passkey access.
+				$stm = $DBH->prepare("SELECT id, SID, FirstName, LastName, password, mfa FROM imas_users WHERE id = :id");
+				$stm->execute([':id' => $userid]);
+				$user = $stm->fetch(PDO::FETCH_ASSOC);
+
+				if (!$user) {
+					throw new Exception('User not found');
+				}
+
+				if (empty($input['password']) || !password_verify($input['password'], $user['password'])) {
+					throw new Exception('Password verification failed');
+				}
+
+				if (!empty($user['mfa'])) {
+					$mfadata = json_decode($user['mfa'], true);
+					require_once __DIR__ . '/includes/GoogleAuthenticator.php';
+					$MFA = new GoogleAuthenticator();
+					if (empty($input['mfatoken']) || !$MFA->verifyCode($mfadata['secret'], $input['mfatoken'])) {
+						throw new Exception('2-factor authentication verification failed');
+					}
+				}
+
+				$options = $passkeyMgr->getRegistrationChallenge($userid, $username, $userfullname);
+				echo json_encode($options);
+			} else {
+				// Handle assertion challenge for login
+				$options = $passkeyMgr->getAssertionChallenge($passkeyusername);
+				echo json_encode($options);
+			}		
+		} catch (Exception $e) {
+			echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+		}
+		exit;
+	}
+	// Handle passkey registration
+	if (isset($_GET['action']) && $_GET['action'] == 'registerPasskey') {
+		require_once "init.php";
+		require_once __DIR__ . '/includes/passkey.php';
+		header('Content-Type: application/json');
+		
+		if (empty($userid)) {
+			echo json_encode(['success' => false, 'error' => 'Not logged in']);
+			exit;
+		}
+		
+		$input = json_decode(file_get_contents('php://input'), true);
+		$attestationObject = $input['response']['attestationObject'] ?? '';
+		$clientDataJSON = $input['response']['clientDataJSON'] ?? '';
+		
+		if (empty($attestationObject) || empty($clientDataJSON)) {
+			echo json_encode(['success' => false, 'error' => 'Missing attestation data']);
+			exit;
+		}
+		
+		try {
+			$rpId = parse_url($GLOBALS['basesiteurl'], PHP_URL_HOST);
+			$passkeyMgr = new PasskeyManager($rpId, isset($installname) ? $installname : 'IMathAS');
+			$passkeyMgr->verifyRegistration($attestationObject, $clientDataJSON, $userid);
+			echo json_encode(['success' => true, 'message' => 'Passkey registered successfully']);
+		} catch (Exception $e) {
+			echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+		}
+		exit;
+	}
 
 	if (isset($_GET['greybox'])) {
 		$isgb = true;
@@ -121,7 +234,7 @@ require_once "includes/sanitize.php";
 			//look for existing account. ignore any LTI accounts
 			$stm = $DBH->prepare("SELECT SID FROM imas_users WHERE email=:email AND SID NOT LIKE 'lti-%'");
 			$stm->execute(array(':email'=>$_POST['email']));
-			if ($stm->rowCount()>0) {
+			if ($stm->fetch(PDO::FETCH_NUM) !== false) {
 				$nologo = true;
                 $_SESSION['newuserstart'] = time() - 10;
 				require_once "header.php";
@@ -289,7 +402,7 @@ require_once "includes/sanitize.php";
 			$query = "SELECT id,email,rights,jsondata FROM imas_users WHERE SID=:sid";
 			$stm = $DBH->prepare($query);
 			$stm->execute(array(':sid'=>$_POST['username']));
-			list($id,$email,$rights,$jsondata) = $stm->fetch(PDO::FETCH_NUM);
+			list($id,$email,$rights,$jsondata) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null,null,null];
 			if ($id !== null) {
                 $jsondata = json_decode($jsondata,true);
 				if (isset($jsondata['lastemail']) && time() - $jsondata['lastemail'] < 60) {
@@ -334,7 +447,7 @@ require_once "includes/sanitize.php";
 				send_email($email, $sendfrom, $installname._(' Password Reset Request'), $message, array(), array(), 10);
 
 				require_once "header.php";
-				echo '<p>',_('An email with a password reset link has been sent your email address on record'),': <b>'.Sanitize::emailAddress($email).'.</b><br/> ';
+				echo '<p>',_('An email with a password reset link has been sent your email address on record'),': <b>'.Sanitize::emailAddress(obfuscateEmail($email)).'.</b><br/> ';
 				echo _('If you do not see it in a few minutes, check your spam or junk box to see if the email ended up there.'),'<br/>';
 				echo sprintf(_('It may help to add %s to your contacts list.'),'<b>'.Sanitize::encodeStringForDisplay($sendfrom).'</b>'),'</p>';
 				echo '<p>',_('If you still have trouble or the wrong email address is on file, contact your instructor - they can reset your password for you.'),'</p>';
@@ -992,6 +1105,27 @@ require_once "includes/sanitize.php";
             exit;
         }
         echo "FAIL";
+        exit;
+    } else if (isset($_POST['action']) && $_POST['action'] == 'deletePasskey') {
+        require_once __DIR__ . '/includes/passkey.php';
+        header('Content-Type: application/json');
+        
+        $passkeyId = intval($_POST['passkeyId'] ?? 0);
+        if ($passkeyId <= 0) {
+            echo json_encode(['success' => false, 'error' => 'Invalid passkey ID']);
+            exit;
+        }
+        
+        try {
+            $passkeyMgr = new PasskeyManager(parse_url($GLOBALS['basesiteurl'], PHP_URL_HOST), isset($installname) ? $installname : 'IMathAS');
+            if ($passkeyMgr->deletePasskey($passkeyId, $userid)) {
+                echo json_encode(['success' => true]);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Failed to delete passkey']);
+            }
+        } catch (Exception $e) {
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        }
         exit;
     } else if (isset($_GET['action']) && $_GET['action']=="forumwidgetsettings") {
 		if (empty($_POST['checked'])) {

@@ -6,6 +6,7 @@
 require_once "../init.php";
 require_once "../includes/htmlutil.php";
 require_once "../includes/TeacherAuditLog.php";
+require_once "../includes/viddatautil.php";
 
  //set some page specific variables and counters
 $overwriteBody = 0;
@@ -20,13 +21,16 @@ if (!(isset($teacherid))) {
 } else {	//PERMISSIONS ARE OK, PERFORM DATA MANIPULATION
 
 	$cid = Sanitize::courseId($_GET['cid']);
-	$aid = Sanitize::onlyInt($_GET['aid']);
+	$aid = Sanitize::onlyInt($_GET['aid'] ?? 0);
 
-  $query = "SELECT ias.id FROM imas_assessment_sessions AS ias,imas_students WHERE ";
-  $query .= "ias.assessmentid=:assessmentid AND ias.userid=imas_students.userid AND imas_students.courseid=:courseid LIMIT 1";
-  $stm = $DBH->prepare($query);
-  $stm->execute(array(':assessmentid'=>$aid, ':courseid'=>$cid));
-  $beentaken = ($stm->rowCount() > 0);
+	$beentaken = false;
+	if ($aid > 0) {
+		$query = "SELECT ias.id FROM imas_assessment_sessions AS ias,imas_students WHERE ";
+		$query .= "ias.assessmentid=:assessmentid AND ias.userid=imas_students.userid AND imas_students.courseid=:courseid LIMIT 1";
+		$stm = $DBH->prepare($query);
+		$stm->execute(array(':assessmentid'=>$aid, ':courseid'=>$cid));
+		$beentaken = ($stm->rowCount() > 0);
+	}
   $page_beenTakenMsg = '';
 
 	$curBreadcrumb = "$breadcrumbbase <a href=\"course.php?cid=$cid\">".Sanitize::encodeStringForDisplay($coursename)."</a> ";
@@ -97,6 +101,7 @@ if (!(isset($teacherid))) {
 				}
 			}
 			if ($stm->rowCount()>0 && $beentaken && count($changes)>0) {
+				$changes['aid'] = $aid;
 				TeacherAuditLog::addTracking(
 				$cid,
 				"Question Settings Change",
@@ -112,13 +117,14 @@ if (!(isset($teacherid))) {
 		}
 		require_once "../includes/updateptsposs.php";
 		if (isset($_GET['qsetid'])) { //new - adding
-			$stm = $DBH->prepare("SELECT itemorder,defpoints FROM imas_assessments WHERE id=:id AND courseid=:cid");
+			$stm = $DBH->prepare("SELECT itemorder,viddata,defpoints FROM imas_assessments WHERE id=:id AND courseid=:cid");
 			$stm->execute(array(':id'=>$aid, ':cid'=>$cid));
-			list($itemorder,$defpoints) = $stm->fetch(PDO::FETCH_NUM);
+			list($itemorder,$viddata,$defpoints) = $stm->fetch(PDO::FETCH_NUM) ?: [null,null,null];
 			if ($itemorder === null || $itemorder === false) {
 				echo 'Invalid aid';
 				exit;
 			}
+			$olditemorder = $itemorder;
 			for ($i=0;$i<$_POST['copies'];$i++) {
 				$query = "INSERT INTO imas_questions (assessmentid,points,attempts,penalty,regen,showans,questionsetid,rubric,showhints,fixedseeds) ";
 				$query .= "VALUES (:assessmentid, :points, :attempts, :penalty, :regen, :showans, :questionsetid, :rubric, :showhints, :fixedseeds)";
@@ -141,8 +147,11 @@ if (!(isset($teacherid))) {
 					}
 				}
 			}
-			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder WHERE id=:id");
-			$stm->execute(array(':itemorder'=>$itemorder, ':id'=>$aid));
+			if ($viddata != '') {
+				$viddata = remapVidData($olditemorder, $itemorder, $viddata);
+			}
+			$stm = $DBH->prepare("UPDATE imas_assessments SET itemorder=:itemorder,viddata=:viddata WHERE id=:id");
+			$stm->execute(array(':itemorder'=>$itemorder, ':viddata'=>$viddata, ':id'=>$aid));
 
 			updatePointsPossible($aid, $itemorder, $defpoints);
 		} else {
@@ -179,6 +188,10 @@ if (!(isset($teacherid))) {
 			if ($line['fixedseeds']===null) {$line['fixedseeds'] = '';}
 			$qsetid = $line['questionsetid'];
 		} else {
+			if (empty($_GET['qsetid'])) {
+				echo 'Missing qsetid';
+				exit;
+			}
 			//set defaults
 			$line['points']="";
 			$line['attempts']="";
@@ -354,8 +367,8 @@ if (!isset($_GET['id'])) {
 <span class=form><?php echo _("Use Scoring Rubric"); ?></span><span class=formright>
 <?php
     writeHtmlSelect('rubric',$rubric_vals,$rubric_names,$line['rubric']);
-    echo " <a href=\"addrubric.php?cid=$cid&amp;id=new&amp;from=modq&amp;aid=" . Sanitize::encodeUrlParam($aid) . "&amp;qid=" . Sanitize::encodeUrlParam($_GET['id']) . "\">"._("Add new rubric")."</a> ";
-    echo "| <a href=\"addrubric.php?cid=$cid&amp;from=modq&amp;aid=" . Sanitize::encodeUrlParam($aid) . "&amp;qid=" . Sanitize::encodeUrlParam($_GET['id']) . "\">"._("Edit rubrics")."</a> ";
+    echo " <a href=\"addrubric.php?cid=$cid&amp;id=new&amp;from=modq&amp;aid=" . Sanitize::encodeUrlParam($aid) . "&amp;qid=" . Sanitize::encodeUrlParam($_GET['id'] ?? '') . "\">"._("Add new rubric")."</a> ";
+    echo "| <a href=\"addrubric.php?cid=$cid&amp;from=modq&amp;aid=" . Sanitize::encodeUrlParam($aid) . "&amp;qid=" . Sanitize::encodeUrlParam($_GET['id'] ?? '') . "\">"._("Edit rubrics")."</a> ";
 ?>
     </span><br class="form"/>
 <?php
